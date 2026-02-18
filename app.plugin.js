@@ -6,8 +6,8 @@ const fs = require('fs');
  * Expo Config Plugin for @dolami-inc/react-native-expo-unity.
  *
  * - Injects required Xcode build settings (bitcode, C++17)
- * - Embeds UnityFramework.framework into the app bundle so it's
- *   available at runtime (Unity ships as a dynamic framework)
+ * - Adds a build phase that embeds UnityFramework.framework into the app
+ *   bundle at build time (device builds only)
  *
  * @param {object} config - Expo config
  * @param {{ unityPath?: string }} options
@@ -20,7 +20,6 @@ const withExpoUnity = (config, options = {}) => {
     const xcodeProject = config.modResults;
     const projectRoot = config.modRequest.projectRoot;
 
-    // Resolve actual filesystem path for the Unity build artifacts.
     const unityPath =
       options.unityPath ||
       process.env.EXPO_UNITY_PATH ||
@@ -33,27 +32,43 @@ const withExpoUnity = (config, options = {}) => {
       if (typeof configuration !== 'object' || !configuration.buildSettings) {
         continue;
       }
-
       const settings = configuration.buildSettings;
-
-      // Unity as a Library does not support bitcode.
       settings['ENABLE_BITCODE'] = 'NO';
-
-      // Unity headers require C++17.
-      // Must be quoted — '+' causes CocoaPods' plist parser to fail if unquoted.
       settings['CLANG_CXX_LANGUAGE_STANDARD'] = '"c++17"';
     }
 
-    // -- Embed UnityFramework --
-    // UnityFramework is a dynamic framework. It must be embedded (copied) into
-    // the app bundle's Frameworks/ directory, otherwise dyld fails at launch.
-    const frameworkPath = path.join(unityPath, 'UnityFramework.framework');
-    if (fs.existsSync(frameworkPath)) {
-      xcodeProject.addFramework(frameworkPath, {
-        customFramework: true,
-        embed: true,
-        sign: true,
-      });
+    // -- Embed UnityFramework via build script phase --
+    // UnityFramework is a dynamic framework that must be embedded (copied)
+    // into the app bundle's Frameworks/ directory, otherwise dyld fails at
+    // launch. We use a shell script build phase instead of vendored_frameworks
+    // because the pod source may live in a read-only package manager cache.
+    const frameworkSrc = path.join(unityPath, 'UnityFramework.framework');
+    if (fs.existsSync(frameworkSrc)) {
+      const target = xcodeProject.getFirstTarget();
+
+      // Shell script that copies and codesigns the framework (device only).
+      const script = [
+        'if [ "${PLATFORM_NAME}" = "iphoneos" ]; then',
+        '  FRAMEWORK_SRC="' + frameworkSrc + '"',
+        '  DEST="${BUILT_PRODUCTS_DIR}/${FRAMEWORKS_FOLDER_PATH}"',
+        '  mkdir -p "${DEST}"',
+        '  rsync -av --delete "${FRAMEWORK_SRC}" "${DEST}/"',
+        '  if [ -n "${EXPANDED_CODE_SIGN_IDENTITY}" ]; then',
+        '    codesign --force --sign "${EXPANDED_CODE_SIGN_IDENTITY}" "${DEST}/UnityFramework.framework"',
+        '  fi',
+        'fi',
+      ].join('\n');
+
+      xcodeProject.addBuildPhase(
+        [],
+        'PBXShellScriptBuildPhase',
+        'Embed UnityFramework',
+        target.uuid,
+        {
+          shellPath: '/bin/sh',
+          shellScript: script,
+        }
+      );
     }
 
     return config;
