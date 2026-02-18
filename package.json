@@ -1,12 +1,23 @@
 {
-  "name": "expo-unity",
+  "name": "react-native-expo-unity",
   "version": "0.1.0",
   "description": "Unity as a Library (UaaL) bridge for React Native / Expo",
   "main": "src/index.ts",
   "types": "src/index.ts",
+  "scripts": {
+    "build": "tsc",
+    "clean": "rm -rf build"
+  },
+  "files": [
+    "src/",
+    "ios/",
+    "plugin/",
+    "docs/",
+    "expo-module.config.json"
+  ],
   "repository": {
     "type": "git",
-    "url": "https://github.com/fahreziadh/expo-unity.git"
+    "url": "https://github.com/fahreziadh/react-native-expo-unity.git"
   },
   "keywords": [
     "expo",
@@ -20,9 +31,9 @@
   "author": "Fahrezi <fahrezi@dolami.is>",
   "license": "MIT",
   "bugs": {
-    "url": "https://github.com/fahreziadh/expo-unity/issues"
+    "url": "https://github.com/fahreziadh/react-native-expo-unity/issues"
   },
-  "homepage": "https://github.com/fahreziadh/expo-unity#readme",
+  "homepage": "https://github.com/fahreziadh/react-native-expo-unity#readme",
   "peerDependencies": {
     "expo": ">=54.0.0",
     "react": "*",

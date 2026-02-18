@@ -1,4 +1,4 @@
-# expo-unity
+# react-native-expo-unity
 
 Unity as a Library (UaaL) bridge for React Native / Expo.
 
@@ -7,17 +7,17 @@ Unity as a Library (UaaL) bridge for React Native / Expo.
 ## Install
 
 ```bash
-npm install expo-unity
+npm install react-native-expo-unity
 # or
-yarn add expo-unity
+yarn add react-native-expo-unity
 # or
-bun add expo-unity
+bun add react-native-expo-unity
 ```
 
 ## Quick Start
 
 ```tsx
-import { UnityView, type UnityViewRef } from "expo-unity";
+import { UnityView, type UnityViewRef } from "react-native-expo-unity";
 
 const unityRef = useRef<UnityViewRef>(null);
 
@@ -56,7 +56,7 @@ unityRef.current?.unloadUnity()
 Same as ref methods, callable anywhere (operates on the singleton):
 
 ```tsx
-import { postMessage, pauseUnity, resumeUnity, unloadUnity, isInitialized } from "expo-unity";
+import { postMessage, pauseUnity, resumeUnity, unloadUnity, isInitialized } from "react-native-expo-unity";
 ```
 
 ## Setup
@@ -67,8 +67,8 @@ Copy the plugin files into your Unity project:
 
 ```bash
 # From node_modules after install
-cp node_modules/expo-unity/plugin/NativeCallProxy.h  <UnityProject>/Assets/Plugins/iOS/
-cp node_modules/expo-unity/plugin/NativeCallProxy.mm <UnityProject>/Assets/Plugins/iOS/
+cp node_modules/react-native-expo-unity/plugin/NativeCallProxy.h  <UnityProject>/Assets/Plugins/iOS/
+cp node_modules/react-native-expo-unity/plugin/NativeCallProxy.mm <UnityProject>/Assets/Plugins/iOS/
 ```
 
 ### 2. Unity project — build iOS

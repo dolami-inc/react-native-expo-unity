@@ -71,7 +71,7 @@ public static class RNBridge
 ## React Native Implementation
 
 ```tsx
-import { UnityView } from "expo-unity";
+import { UnityView } from "react-native-expo-unity";
 
 interface UnityEvent<T = unknown> {
   event: string;
