@@ -13,7 +13,7 @@ Pod::Spec.new do |s|
   s.name           = 'ExpoUnity'
   s.version        = package['version']
   s.summary        = package['description']
-  s.description    = package['description']
+  s.description    = package['description'] + '.'
   s.license        = package['license']
   s.author         = package['author']
   s.homepage       = package['homepage']
@@ -24,33 +24,33 @@ Pod::Spec.new do |s|
   s.dependency 'ExpoModulesCore'
 
   s.source_files = '**/*.{h,m,mm,swift}'
-  s.exclude_files = 'UnityFramework.framework/**/*'
 
-  # Copy all Unity build artifacts into the pod at install time
-  s.prepare_command = <<-CMD
-    if [ -d "#{unity_ios_dir}" ]; then
-      cp -Rn "#{unity_ios_dir}/." . 2>/dev/null || true
-    fi
-  CMD
+  # Unity build artifacts are referenced via xcconfig values using their absolute path.
+  # We intentionally avoid vendored_frameworks / vendored_libraries because:
+  #   1. CocoaPods requires those to be relative paths inside the pod source.
+  #   2. The pod source may live in a read-only package manager cache (e.g. bun),
+  #      making file copies impossible.
+  # xcconfig values accept absolute paths and are passed through to Xcode as-is.
+  framework_exists = File.exist?(File.join(unity_ios_dir, 'UnityFramework.framework'))
+  a_files          = Dir.glob(File.join(unity_ios_dir, '*.a'))
 
-  if File.exist?(File.join(unity_ios_dir, 'UnityFramework.framework'))
-    s.vendored_frameworks = 'UnityFramework.framework'
-  end
-
-  a_files = Dir.glob(File.join(unity_ios_dir, '*.a')).map { |f| File.basename(f) }
-  s.vendored_libraries = a_files unless a_files.empty?
+  unity_ldflags  = []
+  unity_ldflags << '-framework UnityFramework' if framework_exists
+  unity_ldflags += a_files.map { |f| "\"#{f}\"" }
 
   s.pod_target_xcconfig = {
-    'HEADER_SEARCH_PATHS' => [
-      '"${PODS_TARGET_SRCROOT}/UnityFramework.framework/Headers"',
-      "\"#{unity_ios_dir}/UnityFramework.framework/Headers\""
-    ].join(' '),
-    'CLANG_CXX_LANGUAGE_STANDARD' => 'c++17',
+    'HEADER_SEARCH_PATHS'          => "\"#{unity_ios_dir}/UnityFramework.framework/Headers\"",
+    'FRAMEWORK_SEARCH_PATHS'       => "\"#{unity_ios_dir}\"",
+    'OTHER_LDFLAGS'                => unity_ldflags.join(' '),
+    'CLANG_CXX_LANGUAGE_STANDARD'  => 'c++17',
     'GCC_PREPROCESSOR_DEFINITIONS' => 'UNITY_FRAMEWORK=1',
-    'ENABLE_BITCODE' => 'NO'
+    'ENABLE_BITCODE'               => 'NO'
   }
 
   s.user_target_xcconfig = {
-    'ENABLE_BITCODE' => 'NO'
+    'ENABLE_BITCODE'         => 'NO',
+    'FRAMEWORK_SEARCH_PATHS' => "\"#{unity_ios_dir}\"",
+    'LIBRARY_SEARCH_PATHS'   => "\"#{unity_ios_dir}\"",
+    'OTHER_LDFLAGS'          => unity_ldflags.join(' ')
   }
 end

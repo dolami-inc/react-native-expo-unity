@@ -1,4 +1,4 @@
-# react-native-expo-unity
+# @dolami-inc/react-native-expo-unity
 
 Unity as a Library (UaaL) bridge for React Native / Expo.
 
@@ -7,17 +7,17 @@ Unity as a Library (UaaL) bridge for React Native / Expo.
 ## Install
 
 ```bash
-npm install react-native-expo-unity
+npm install @dolami-inc/react-native-expo-unity
 # or
-yarn add react-native-expo-unity
+yarn add @dolami-inc/react-native-expo-unity
 # or
-bun add react-native-expo-unity
+bun add @dolami-inc/react-native-expo-unity
 ```
 
 ## Quick Start
 
 ```tsx
-import { UnityView, type UnityViewRef } from "react-native-expo-unity";
+import { UnityView, type UnityViewRef } from "@dolami-inc/react-native-expo-unity";
 
 const unityRef = useRef<UnityViewRef>(null);
 
@@ -56,7 +56,7 @@ unityRef.current?.unloadUnity()
 Same as ref methods, callable anywhere (operates on the singleton):
 
 ```tsx
-import { postMessage, pauseUnity, resumeUnity, unloadUnity, isInitialized } from "react-native-expo-unity";
+import { postMessage, pauseUnity, resumeUnity, unloadUnity, isInitialized } from "@dolami-inc/react-native-expo-unity";
 ```
 
 ## Setup
@@ -67,8 +67,8 @@ Copy the plugin files into your Unity project:
 
 ```bash
 # From node_modules after install
-cp node_modules/react-native-expo-unity/plugin/NativeCallProxy.h  <UnityProject>/Assets/Plugins/iOS/
-cp node_modules/react-native-expo-unity/plugin/NativeCallProxy.mm <UnityProject>/Assets/Plugins/iOS/
+cp node_modules/@dolami-inc/react-native-expo-unity/plugin/NativeCallProxy.h  <UnityProject>/Assets/Plugins/iOS/
+cp node_modules/@dolami-inc/react-native-expo-unity/plugin/NativeCallProxy.mm <UnityProject>/Assets/Plugins/iOS/
 ```
 
 ### 2. Unity project — build iOS
@@ -81,15 +81,17 @@ cp node_modules/react-native-expo-unity/plugin/NativeCallProxy.mm <UnityProject>
 
 ### 3. Copy build artifacts to your RN project
 
-Create `unity/builds/ios/` in your project root and copy:
+Create `unity/builds/ios/` in your project root and copy all artifacts from your Unity iOS build:
 
 ```bash
 mkdir -p unity/builds/ios
 cp -R <unity-build>/UnityFramework.framework unity/builds/ios/
-cp <unity-build>/{baselib.a,il2cpp.a,libGameAssembly.a} unity/builds/ios/
+cp <unity-build>/*.a unity/builds/ios/
 ```
 
-> Custom path? Set `EXPO_UNITY_PATH` environment variable to your Unity build directory.
+The podspec references these files **directly by path** — nothing is copied or embedded into the npm package. Updating your Unity build is as simple as replacing the contents of `unity/builds/ios/` and re-running `pod install`.
+
+> Custom path? Set `EXPO_UNITY_PATH` environment variable pointing to your Unity build directory, or pass `unityPath` to the config plugin (see step 4).
 
 ### 4. Add the config plugin to `app.json`
 
@@ -97,7 +99,7 @@ cp <unity-build>/{baselib.a,il2cpp.a,libGameAssembly.a} unity/builds/ios/
 {
   "expo": {
     "plugins": [
-      "react-native-expo-unity"
+      "@dolami-inc/react-native-expo-unity"
     ]
   }
 }
@@ -111,7 +113,7 @@ The plugin automatically configures the required Xcode build settings:
 If your Unity artifacts are in a custom path, pass the option:
 
 ```json
-["react-native-expo-unity", { "unityPath": "/absolute/path/to/unity/builds/ios" }]
+["@dolami-inc/react-native-expo-unity", { "unityPath": "/absolute/path/to/unity/builds/ios" }]
 ```
 
 ### 5. Build
