@@ -169,6 +169,13 @@ sendMessageToMobileApp("{\"event\":\"image_taken\",\"data\":{\"path\":\"/tmp/pho
 - [Lifecycle Deep Dive](docs/lifecycle.md) — navigation scenarios, state management, trade-offs
 - [Messaging Guide](docs/messaging.md) — recommended JSON format, Unity C# + RN examples
 
+## Requirements
+
+- **Expo SDK 54+**
+- **React Native New Architecture** (Fabric) — old architecture not supported
+- **Physical iOS device** — Simulator not supported (Unity framework is ARM only)
+- **Unity build artifacts** — must be copied manually into your project (~2GB, not bundled via npm)
+
 ## Platform Support
 
 | Platform | Status |
@@ -179,9 +186,11 @@ sendMessageToMobileApp("{\"event\":\"image_taken\",\"data\":{\"path\":\"/tmp/pho
 
 ## Limitations
 
-- **No Simulator** — Unity framework is ARM device only
-- **Single instance** — one Unity view at a time
-- **Memory** — unloaded Unity retains 80-180MB (Unity limitation)
+- **Single instance** — only one Unity view at a time, cannot run multiple
+- **Full-screen rendering only** — Unity renders full-screen within its view (Unity limitation)
+- **Memory retention** — after `unloadUnity()`, Unity retains 80-180MB in memory (Unity limitation)
+- **No reload after quit** — if Unity calls `Application.Quit()` on iOS, it cannot be restarted without restarting the app
+- **No hot reload** — native code changes require a full rebuild
 
 ## License
 
