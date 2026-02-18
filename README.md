@@ -91,7 +91,30 @@ cp <unity-build>/{baselib.a,il2cpp.a,libGameAssembly.a} unity/builds/ios/
 
 > Custom path? Set `EXPO_UNITY_PATH` environment variable to your Unity build directory.
 
-### 4. Build
+### 4. Add the config plugin to `app.json`
+
+```json
+{
+  "expo": {
+    "plugins": [
+      "react-native-expo-unity"
+    ]
+  }
+}
+```
+
+The plugin automatically configures the required Xcode build settings:
+- `ENABLE_BITCODE = NO` — Unity does not support bitcode
+- `CLANG_CXX_LANGUAGE_STANDARD = c++17` — required for Unity headers
+- `FRAMEWORK_SEARCH_PATHS` — adds the Unity build artifacts directory
+
+If your Unity artifacts are in a custom path, pass the option:
+
+```json
+["react-native-expo-unity", { "unityPath": "/absolute/path/to/unity/builds/ios" }]
+```
+
+### 5. Build
 
 ```bash
 expo prebuild --platform ios --clean
@@ -173,7 +196,7 @@ sendMessageToMobileApp("{\"event\":\"image_taken\",\"data\":{\"path\":\"/tmp/pho
 
 - **Expo SDK 54+**
 - **React Native New Architecture** (Fabric) — old architecture not supported
-- **Physical iOS device** — Simulator not supported (Unity framework is ARM only)
+- **Physical iOS device** — Unity renders only on device; Simulator shows a placeholder view
 - **Unity build artifacts** — must be copied manually into your project (~2GB, not bundled via npm)
 
 ## Platform Support
@@ -181,7 +204,7 @@ sendMessageToMobileApp("{\"event\":\"image_taken\",\"data\":{\"path\":\"/tmp/pho
 | Platform | Status |
 |---|---|
 | iOS Device | ✅ Supported |
-| iOS Simulator | ❌ Not supported (Unity limitation) |
+| iOS Simulator | ⚠️ Not supported — renders a placeholder view |
 | Android | 🚧 Coming soon |
 
 ## Limitations

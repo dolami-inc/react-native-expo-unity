@@ -7,7 +7,6 @@ typedef void (^UnityMessageCallback)(NSString * _Nonnull message);
 
 @interface UnityBridge : NSObject
 
-@property (nonatomic, strong, nullable) id ufw;
 @property (nonatomic, copy, nullable) UnityMessageCallback onMessage;
 
 + (instancetype)shared;

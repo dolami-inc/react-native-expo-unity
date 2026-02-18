@@ -1,4 +1,43 @@
 #import "UnityBridge.h"
+
+// ------------------------------------------------------------------
+// UnityBridge — singleton that owns the UnityFramework lifecycle.
+// Called from Swift via @objc interop.
+//
+// On Simulator, all methods are no-ops because Unity as a Library
+// does not support the iOS Simulator target.
+// ------------------------------------------------------------------
+
+#if TARGET_OS_SIMULATOR
+
+// MARK: - Simulator stubs
+
+@implementation UnityBridge
+
+static UnityBridge *_shared = nil;
+
++ (instancetype)shared {
+    static dispatch_once_t onceToken;
+    dispatch_once(&onceToken, ^{
+        _shared = [[UnityBridge alloc] init];
+    });
+    return _shared;
+}
+
+- (BOOL)isInitialized { return NO; }
+- (void)initialize { NSLog(@"[ExpoUnity] Unity is not available on iOS Simulator"); }
+- (nullable UIView *)unityRootView { return nil; }
+- (nullable UIWindow *)unityWindow { return nil; }
+- (void)sendMessage:(NSString *)gameObject methodName:(NSString *)methodName message:(NSString *)message {}
+- (void)pause:(BOOL)pause {}
+- (void)unload {}
+
+@end
+
+#else // !TARGET_OS_SIMULATOR
+
+// MARK: - Device implementation
+
 #import <UnityFramework/UnityFramework.h>
 #import <UnityFramework/NativeCallProxy.h>
 
@@ -6,20 +45,11 @@
 #include <mach-o/ldsyms.h>
 #endif
 
-// ------------------------------------------------------------------
-// UnityBridge — singleton that owns the UnityFramework lifecycle.
-// Called from Swift via @objc interop.
-// ------------------------------------------------------------------
-
 @interface UnityBridge () <NativeCallsProtocol, UnityFrameworkListener>
 
 @property (nonatomic, strong, nullable) UnityFramework *ufwInternal;
 
 @end
-
-// ------------------------------------------------------------------
-// Implementation
-// ------------------------------------------------------------------
 
 @implementation UnityBridge
 
@@ -146,3 +176,5 @@ static UnityBridge *_shared = nil;
 }
 
 @end
+
+#endif // !TARGET_OS_SIMULATOR
