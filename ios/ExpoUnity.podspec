@@ -38,19 +38,22 @@ Pod::Spec.new do |s|
   unity_ldflags << '-framework UnityFramework' if framework_exists
   unity_ldflags += a_files.map { |f| "\"#{f}\"" }
 
+  # Unity framework is ARM-only (device build) — never link it for Simulator.
+  # The [sdk=iphoneos*] conditional ensures these settings only apply when
+  # building for a physical device, not the Simulator SDK.
   s.pod_target_xcconfig = {
-    'HEADER_SEARCH_PATHS'          => "\"#{unity_ios_dir}/UnityFramework.framework/Headers\"",
-    'FRAMEWORK_SEARCH_PATHS'       => "\"#{unity_ios_dir}\"",
-    'OTHER_LDFLAGS'                => unity_ldflags.join(' '),
-    'CLANG_CXX_LANGUAGE_STANDARD'  => 'c++17',
-    'GCC_PREPROCESSOR_DEFINITIONS' => 'UNITY_FRAMEWORK=1',
-    'ENABLE_BITCODE'               => 'NO'
+    'HEADER_SEARCH_PATHS'                        => "\"#{unity_ios_dir}/UnityFramework.framework/Headers\"",
+    'FRAMEWORK_SEARCH_PATHS[sdk=iphoneos*]'      => "\"#{unity_ios_dir}\"",
+    'OTHER_LDFLAGS[sdk=iphoneos*]'               => unity_ldflags.join(' '),
+    'CLANG_CXX_LANGUAGE_STANDARD'                => 'c++17',
+    'GCC_PREPROCESSOR_DEFINITIONS'               => 'UNITY_FRAMEWORK=1',
+    'ENABLE_BITCODE'                             => 'NO'
   }
 
   s.user_target_xcconfig = {
-    'ENABLE_BITCODE'         => 'NO',
-    'FRAMEWORK_SEARCH_PATHS' => "\"#{unity_ios_dir}\"",
-    'LIBRARY_SEARCH_PATHS'   => "\"#{unity_ios_dir}\"",
-    'OTHER_LDFLAGS'          => unity_ldflags.join(' ')
+    'ENABLE_BITCODE'                         => 'NO',
+    'FRAMEWORK_SEARCH_PATHS[sdk=iphoneos*]'  => "\"#{unity_ios_dir}\"",
+    'LIBRARY_SEARCH_PATHS[sdk=iphoneos*]'    => "\"#{unity_ios_dir}\"",
+    'OTHER_LDFLAGS[sdk=iphoneos*]'           => unity_ldflags.join(' ')
   }
 end
