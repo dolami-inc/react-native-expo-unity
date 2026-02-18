@@ -1,0 +1,188 @@
+# expo-unity
+
+Unity as a Library (UaaL) bridge for React Native / Expo.
+
+> ⚠️ **iOS only** — Android support is coming soon.
+
+## Install
+
+```bash
+npm install expo-unity
+# or
+yarn add expo-unity
+# or
+bun add expo-unity
+```
+
+## Quick Start
+
+```tsx
+import { UnityView, type UnityViewRef } from "expo-unity";
+
+const unityRef = useRef<UnityViewRef>(null);
+
+<UnityView
+  ref={unityRef}
+  style={{ flex: 1 }}
+  onUnityMessage={(e) => console.log(e.message)}
+/>
+
+// Send message to Unity
+unityRef.current?.postMessage("GameObject", "Method", "payload");
+```
+
+## API
+
+### `<UnityView />`
+
+| Prop | Type | Default | Description |
+|---|---|---|---|
+| `onUnityMessage` | `(e: { message: string }) => void` | — | Message from Unity |
+| `autoUnloadOnUnmount` | `boolean` | `true` | Unload Unity when view unmounts. Set `false` to pause only (keeps state). |
+| `style` | `ViewStyle` | — | Must have dimensions (e.g. `flex: 1`) |
+| `ref` | `UnityViewRef` | — | Imperative methods |
+
+### Ref Methods
+
+```tsx
+unityRef.current?.postMessage(gameObject, methodName, message)
+unityRef.current?.pauseUnity()
+unityRef.current?.resumeUnity()
+unityRef.current?.unloadUnity()
+```
+
+### Standalone Functions
+
+Same as ref methods, callable anywhere (operates on the singleton):
+
+```tsx
+import { postMessage, pauseUnity, resumeUnity, unloadUnity, isInitialized } from "expo-unity";
+```
+
+## Setup
+
+### 1. Unity project — add plugin
+
+Copy the plugin files into your Unity project:
+
+```bash
+# From node_modules after install
+cp node_modules/expo-unity/plugin/NativeCallProxy.h  <UnityProject>/Assets/Plugins/iOS/
+cp node_modules/expo-unity/plugin/NativeCallProxy.mm <UnityProject>/Assets/Plugins/iOS/
+```
+
+### 2. Unity project — build iOS
+
+1. Unity → File → Build Settings → iOS → Build
+2. Open generated Xcode project
+3. Select `NativeCallProxy.h` in Libraries/Plugins/iOS/
+4. Set Target Membership → `UnityFramework` → **Public**
+5. Build `UnityFramework` scheme
+
+### 3. Copy build artifacts to your RN project
+
+Create `unity/builds/ios/` in your project root and copy:
+
+```bash
+mkdir -p unity/builds/ios
+cp -R <unity-build>/UnityFramework.framework unity/builds/ios/
+cp <unity-build>/{baselib.a,il2cpp.a,libGameAssembly.a} unity/builds/ios/
+```
+
+> Custom path? Set `EXPO_UNITY_PATH` environment variable to your Unity build directory.
+
+### 4. Build
+
+```bash
+expo prebuild --platform ios --clean
+expo run:ios --device
+```
+
+## Lifecycle
+
+Unity is a **singleton** — one instance for the entire app.
+
+| State | Memory | Re-entry |
+|---|---|---|
+| Running | ~200-500MB+ (depends on scene/assets) | Already running |
+| Paused | Same (frozen in memory, no CPU/GPU usage) | `resumeUnity()` — instant, state preserved |
+| Unloaded | ~80-180MB retained (Unity limitation) | Remount `<UnityView />` — ~1-2s reinit, state reset |
+
+### Auto behavior
+
+| Event | What happens |
+|---|---|
+| `<UnityView />` mounts | Unity initializes and starts rendering |
+| `<UnityView />` unmounts | Unity unloads (or pauses if `autoUnloadOnUnmount={false}`) |
+| App → background | Unity pauses |
+| App → foreground | Unity resumes |
+
+### Manual control
+
+Screen focus/blur is **not** automatic — handle with `useFocusEffect`:
+
+```tsx
+useFocusEffect(
+  useCallback(() => {
+    unityRef.current?.resumeUnity();
+    return () => unityRef.current?.pauseUnity();
+  }, [])
+);
+```
+
+## Messaging
+
+### RN → Unity
+
+```tsx
+unityRef.current?.postMessage("GameManager", "LoadAvatar", '{"id":"avatar_01"}');
+```
+
+```csharp
+// Unity C# — on "GameManager" GameObject
+public void LoadAvatar(string json) { /* ... */ }
+```
+
+### Unity → RN
+
+```csharp
+#if UNITY_IOS && !UNITY_EDITOR
+[DllImport("__Internal")]
+private static extern void sendMessageToMobileApp(string message);
+#endif
+
+// Recommended: JSON format
+sendMessageToMobileApp("{\"event\":\"image_taken\",\"data\":{\"path\":\"/tmp/photo.jpg\"}}");
+```
+
+```tsx
+<UnityView onUnityMessage={(e) => {
+  const msg = JSON.parse(e.message);
+  // msg.event, msg.data
+}} />
+```
+
+> See [Messaging Guide](docs/messaging.md) for recommended patterns.
+
+## Docs
+
+- [Lifecycle Deep Dive](docs/lifecycle.md) — navigation scenarios, state management, trade-offs
+- [Messaging Guide](docs/messaging.md) — recommended JSON format, Unity C# + RN examples
+
+## Platform Support
+
+| Platform | Status |
+|---|---|
+| iOS Device | ✅ Supported |
+| iOS Simulator | ❌ Not supported (Unity limitation) |
+| Android | 🚧 Coming soon |
+
+## Limitations
+
+- **No Simulator** — Unity framework is ARM device only
+- **Single instance** — one Unity view at a time
+- **Memory** — unloaded Unity retains 80-180MB (Unity limitation)
+
+## License
+
+MIT

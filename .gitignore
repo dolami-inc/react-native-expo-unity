@@ -1,0 +1,17 @@
+# Dependencies
+node_modules/
+
+# Build
+build/
+*.tsbuildinfo
+
+# Unity build artifacts (users copy these locally)
+ios/UnityFramework.framework/
+ios/*.a
+
+# OS
+.DS_Store
+
+# IDE
+.vscode/
+.idea/
