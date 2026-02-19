@@ -77,16 +77,30 @@ cp node_modules/@dolami-inc/react-native-expo-unity/plugin/NativeCallProxy.mm <U
 2. Open generated Xcode project
 3. Select `NativeCallProxy.h` in Libraries/Plugins/iOS/
 4. Set Target Membership → `UnityFramework` → **Public**
-5. Build `UnityFramework` scheme
+5. **Select the `Data` folder** in the Project Navigator
+6. In the right panel under **Target Membership**, check **`UnityFramework`** ✅
+   > ⚠️ **This is critical.** Without this, the `Data` folder (which contains `global-metadata.dat` and all Unity assets) will NOT be included inside `UnityFramework.framework`. The app will crash at launch with: `Could not open .../global-metadata.dat — IL2CPP initialization failed`
+7. Build `UnityFramework` scheme
 
 ### 3. Copy build artifacts to your RN project
 
-Create `unity/builds/ios/` in your project root and copy all artifacts from your Unity iOS build:
+Create `unity/builds/ios/` in your project root and copy the built framework and static libraries:
 
 ```bash
 mkdir -p unity/builds/ios
-cp -R <unity-build>/UnityFramework.framework unity/builds/ios/
-cp <unity-build>/*.a unity/builds/ios/
+
+# Copy the compiled framework (should already contain Data/ inside after step 2.6)
+cp -R <xcode-build-output>/UnityFramework.framework unity/builds/ios/
+
+# Copy static libraries from the Unity Xcode project root
+cp <unity-xcode-project>/*.a unity/builds/ios/
+```
+
+Verify that `Data/` exists inside the framework:
+
+```bash
+ls unity/builds/ios/UnityFramework.framework/Data
+# Should show: Managed/  Resources/  etc.
 ```
 
 The podspec references these files **directly by path** — nothing is copied or embedded into the npm package. Updating your Unity build is as simple as replacing the contents of `unity/builds/ios/` and re-running `pod install`.
