@@ -62,6 +62,11 @@ class UnityBridge private constructor() : IUnityPlayerLifecycleEvents, NativeCal
 
         val runInit = Runnable {
             try {
+                // Load native libraries required by Unity's GameActivity mode.
+                // Unity's own launcher does this via android.app.lib_name metadata,
+                // but since we bypass GameActivity lifecycle we load manually.
+                System.loadLibrary("game")
+
                 // Create the container and surface that Unity will render into
                 val frameLayout = FrameLayout(activity)
                 frameLayout.layoutParams = FrameLayout.LayoutParams(
