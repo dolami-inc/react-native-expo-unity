@@ -33,17 +33,13 @@ class ExpoUnityView(context: Context, appContext: AppContext) : ExpoView(context
             }
         }
 
-        if (bridge.isReady) {
-            // Unity already initialized — just reparent the view into this container
-            bridge.addUnityViewToGroup(this)
-            Log.i(TAG, "Unity already ready, reparented view")
+        if (bridge.isInitialized) {
+            // Unity already created — attach the view to this container
+            bridge.attachToContainer(this)
         } else {
-            // Initialize Unity with a callback that reparents when ready
+            // Create Unity player, then attach the view once ready
             bridge.initialize(activity) {
-                post {
-                    bridge.addUnityViewToGroup(this)
-                    Log.i(TAG, "Unity ready, view reparented into container")
-                }
+                bridge.attachToContainer(this)
             }
         }
     }
@@ -51,7 +47,7 @@ class ExpoUnityView(context: Context, appContext: AppContext) : ExpoView(context
     override fun onWindowFocusChanged(hasWindowFocus: Boolean) {
         super.onWindowFocusChanged(hasWindowFocus)
         val bridge = UnityBridge.getInstance()
-        if (!bridge.isReady) return
+        if (!bridge.isInitialized) return
         bridge.unityPlayer?.windowFocusChanged(hasWindowFocus)
     }
 
@@ -61,13 +57,12 @@ class ExpoUnityView(context: Context, appContext: AppContext) : ExpoView(context
 
         if (bridge.isInitialized) {
             if (autoUnloadOnUnmount) {
+                bridge.detachFromContainer()
                 bridge.unload()
-                Log.i(TAG, "Auto-unloaded (view detached)")
+                Log.i(TAG, "Detached and unloaded (view detached)")
             } else {
-                // Park Unity in the background instead of unloading
-                bridge.parkUnityViewInBackground()
                 bridge.setPaused(true)
-                Log.i(TAG, "Parked in background (autoUnloadOnUnmount=false)")
+                Log.i(TAG, "Paused (autoUnloadOnUnmount=false)")
             }
         }
 

@@ -18,10 +18,9 @@ import com.unity3d.player.UnityPlayerForActivityOrService
  * Singleton managing the UnityPlayer lifecycle.
  * Android equivalent of ios/UnityBridge.mm.
  *
- * Uses a "background parking" pattern: Unity is always attached to the
- * Activity's content view (at 1x1px, Z=-1) so it stays alive. When a
- * React Native view wants to show Unity, we reparent the FrameLayout
- * into that view. When it unmounts, we park it back in the background.
+ * Creates the Unity player and lets the ExpoUnityView add the
+ * FrameLayout directly — no background parking, since Unity 6's
+ * window management times out when reparenting from a background view.
  */
 class UnityBridge private constructor() : IUnityPlayerLifecycleEvents, NativeCallProxy.MessageListener {
 
@@ -49,9 +48,6 @@ class UnityBridge private constructor() : IUnityPlayerLifecycleEvents, NativeCal
     /** Tracked here (not on the Module) so it survives module recreation. */
     var wasRunningBeforeBackground: Boolean = false
 
-    var isReady: Boolean = false
-        private set
-
     val isInitialized: Boolean
         get() = unityPlayer != null
 
@@ -62,6 +58,10 @@ class UnityBridge private constructor() : IUnityPlayerLifecycleEvents, NativeCal
     val unityPlayerView: FrameLayout?
         get() = unityPlayer?.frameLayout
 
+    /**
+     * Creates the UnityPlayer. The caller is responsible for adding
+     * [unityPlayerView] to the view hierarchy immediately after [onReady] fires.
+     */
     fun initialize(activity: Activity, onReady: (() -> Unit)? = null) {
         if (isInitialized) {
             onReady?.invoke()
@@ -83,25 +83,11 @@ class UnityBridge private constructor() : IUnityPlayerLifecycleEvents, NativeCal
                 NativeCallProxy.registerListener(this)
                 Log.i(TAG, "Unity player created")
 
-                // Give Unity time to initialize its rendering pipeline
-                Thread.sleep(1000)
-
-                // Park the Unity view in the background (1x1px, behind everything)
-                addUnityViewToBackground(activity)
-
-                // Kick-start rendering
-                player.windowFocusChanged(true)
-                player.frameLayout?.requestFocus()
-                player.resume()
-
                 // Restore fullscreen state if Unity changed it
                 if (!wasFullScreen) {
                     activity.window.addFlags(WindowManager.LayoutParams.FLAG_FORCE_NOT_FULLSCREEN)
                     activity.window.clearFlags(WindowManager.LayoutParams.FLAG_FULLSCREEN)
                 }
-
-                isReady = true
-                Log.i(TAG, "Unity initialized and ready")
 
                 onReady?.invoke()
             } catch (e: Exception) {
@@ -117,67 +103,42 @@ class UnityBridge private constructor() : IUnityPlayerLifecycleEvents, NativeCal
     }
 
     /**
-     * Parks the Unity view in the Activity's content view at 1x1 pixels
-     * behind all other views (Z=-1). This keeps Unity alive but invisible.
+     * Adds the Unity FrameLayout to the given container and starts rendering.
+     * Must be called after [initialize] completes.
      */
-    private fun addUnityViewToBackground(activity: Activity) {
-        val frame = unityPlayerView ?: return
+    fun attachToContainer(container: ViewGroup) {
+        val frame = unityPlayerView ?: run {
+            Log.w(TAG, "Unity player view not available")
+            return
+        }
 
         // Remove from current parent if any
-        (frame.parent as? ViewGroup)?.let { parent ->
-            parent.endViewTransition(frame)
-            parent.removeView(frame)
-        }
-
-        frame.z = -1f
-
-        val layoutParams = ViewGroup.LayoutParams(1, 1)
-        activity.addContentView(frame, layoutParams)
-        Log.i(TAG, "Unity view parked in background")
-    }
-
-    /**
-     * Moves the Unity view from wherever it currently is into the
-     * specified ViewGroup with MATCH_PARENT layout. Called when the
-     * React Native component mounts.
-     */
-    fun addUnityViewToGroup(group: ViewGroup) {
-        val frame = unityPlayerView ?: return
-
-        // Remove from current parent
         (frame.parent as? ViewGroup)?.removeView(frame)
 
-        val layoutParams = ViewGroup.LayoutParams(
-            ViewGroup.LayoutParams.MATCH_PARENT,
-            ViewGroup.LayoutParams.MATCH_PARENT
+        val layoutParams = FrameLayout.LayoutParams(
+            FrameLayout.LayoutParams.MATCH_PARENT,
+            FrameLayout.LayoutParams.MATCH_PARENT
         )
-        group.addView(frame, 0, layoutParams)
+        container.addView(frame, 0, layoutParams)
+        Log.i(TAG, "Unity view attached to container")
 
-        unityPlayer?.windowFocusChanged(true)
-        frame.requestFocus()
-        unityPlayer?.resume()
-
-        Log.i(TAG, "Unity view moved to visible container")
+        // Kick-start rendering after the view is in the hierarchy.
+        // Use post to let the layout pass complete first.
+        frame.post {
+            unityPlayer?.windowFocusChanged(true)
+            frame.requestFocus()
+            unityPlayer?.resume()
+            Log.i(TAG, "Rendering started")
+        }
     }
 
     /**
-     * Parks the Unity view back to the background. Called when the
-     * React Native component unmounts.
+     * Detaches the Unity view from its current parent without destroying it.
      */
-    fun parkUnityViewInBackground() {
+    fun detachFromContainer() {
         val frame = unityPlayerView ?: return
-        val activity = frame.context as? Activity ?: return
-
-        (frame.parent as? ViewGroup)?.let { parent ->
-            parent.endViewTransition(frame)
-            parent.removeView(frame)
-        }
-
-        frame.z = -1f
-
-        val layoutParams = ViewGroup.LayoutParams(1, 1)
-        activity.addContentView(frame, layoutParams)
-        Log.i(TAG, "Unity view parked back to background")
+        (frame.parent as? ViewGroup)?.removeView(frame)
+        Log.i(TAG, "Unity view detached from container")
     }
 
     fun sendMessage(gameObject: String, methodName: String, message: String) {
@@ -203,7 +164,6 @@ class UnityBridge private constructor() : IUnityPlayerLifecycleEvents, NativeCal
 
     fun unload() {
         if (!isInitialized) return
-        isReady = false
         Log.i(TAG, "unload called")
         val action = Runnable {
             unityPlayer?.unload()
@@ -221,13 +181,11 @@ class UnityBridge private constructor() : IUnityPlayerLifecycleEvents, NativeCal
     override fun onUnityPlayerUnloaded() {
         Log.i(TAG, "onUnityPlayerUnloaded")
         unityPlayer = null
-        isReady = false
     }
 
     override fun onUnityPlayerQuitted() {
         Log.i(TAG, "onUnityPlayerQuitted")
         unityPlayer = null
-        isReady = false
     }
 
     // NativeCallProxy.MessageListener (Unity -> RN)
