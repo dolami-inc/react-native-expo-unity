@@ -44,11 +44,12 @@ class UnityBridge private constructor() : IUnityPlayerLifecycleEvents, NativeCal
         get() = unityPlayer != null
 
     /**
-     * Returns the UnityPlayer view for embedding.
-     * Unity 6+ made UnityPlayer abstract; use getView() to get the renderable view.
+     * Returns the UnityPlayer's FrameLayout container for embedding.
+     * Unity 6+ made UnityPlayer abstract; getFrameLayout() returns the full
+     * container with the rendering surface inside it.
      */
     val unityPlayerView: View?
-        get() = unityPlayer?.view
+        get() = unityPlayer?.frameLayout
 
     fun initialize(activity: Activity) {
         if (isInitialized) return
@@ -57,6 +58,11 @@ class UnityBridge private constructor() : IUnityPlayerLifecycleEvents, NativeCal
             try {
                 val player = UnityPlayerForActivityOrService(activity, this)
                 unityPlayer = player
+
+                // Start Unity rendering — without these calls the player
+                // stays in a paused/unfocused state and shows a blank screen.
+                player.resume()
+                player.windowFocusChanged(true)
 
                 NativeCallProxy.registerListener(this)
 
