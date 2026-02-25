@@ -16,7 +16,7 @@ const fs = require('fs');
  *   bundle at build time (device builds only)
  *
  * Android:
- * - Includes the :unityLibrary Gradle module in settings.gradle
+ * - Includes the :unityLibrary Gradle module and .androidlib subprojects in settings.gradle
  * - Adds flatDir repos for Unity's .aar/.jar libs in root build.gradle
  * - Adds the unityLibrary dependency and NDK abiFilters in app/build.gradle
  *
@@ -84,7 +84,7 @@ const withExpoUnity = (config, options = {}) => {
     return config;
   });
 
-  // -- Android: settings.gradle (include :unityLibrary module) --
+  // -- Android: settings.gradle (include :unityLibrary module + subprojects) --
   config = withSettingsGradle(config, (config) => {
     const projectRoot = config.modRequest.projectRoot;
     const androidUnityPath =
@@ -92,16 +92,30 @@ const withExpoUnity = (config, options = {}) => {
       process.env.EXPO_UNITY_ANDROID_PATH ||
       path.join(projectRoot, 'unity', 'builds', 'android');
 
-    const contents = config.modResults.contents;
+    const unityLibDir = path.join(androidUnityPath, 'unityLibrary');
 
     // Include :unityLibrary module
     const includeSnippet = `include ':unityLibrary'`;
-    const projectSnippet = `project(':unityLibrary').projectDir = new File('${androidUnityPath}/unityLibrary')`;
+    const projectSnippet = `project(':unityLibrary').projectDir = new File('${unityLibDir}')`;
 
-    if (!contents.includes(includeSnippet)) {
-      config.modResults.contents =
-        contents +
+    if (!config.modResults.contents.includes(includeSnippet)) {
+      config.modResults.contents +=
         `\n// Unity as a Library\n${includeSnippet}\n${projectSnippet}\n`;
+    }
+
+    // Auto-discover .androidlib subprojects (e.g. xrmanifest.androidlib)
+    if (fs.existsSync(unityLibDir)) {
+      const subprojects = fs.readdirSync(unityLibDir).filter((name) =>
+        name.endsWith('.androidlib') &&
+        fs.existsSync(path.join(unityLibDir, name, 'build.gradle'))
+      );
+
+      for (const sub of subprojects) {
+        const subInclude = `include ':unityLibrary:${sub}'`;
+        if (!config.modResults.contents.includes(subInclude)) {
+          config.modResults.contents += `${subInclude}\n`;
+        }
+      }
     }
 
     return config;
