@@ -2,8 +2,6 @@
 
 Unity as a Library (UaaL) bridge for React Native / Expo.
 
-> ⚠️ **iOS only** — Android support is coming soon.
-
 ## Install
 
 ```bash
@@ -61,9 +59,11 @@ import { postMessage, pauseUnity, resumeUnity, unloadUnity, isInitialized } from
 
 ## Setup
 
-### 1. Unity project — add plugin
+### 1. Unity project — add plugins
 
-Copy the plugin files into your Unity project:
+Copy the platform bridge files into your Unity project:
+
+**iOS:**
 
 ```bash
 # From node_modules after install
@@ -71,22 +71,34 @@ cp node_modules/@dolami-inc/react-native-expo-unity/plugin/NativeCallProxy.h  <U
 cp node_modules/@dolami-inc/react-native-expo-unity/plugin/NativeCallProxy.mm <UnityProject>/Assets/Plugins/iOS/
 ```
 
-### 2. Unity project — build iOS
+**Android:**
 
-> 📹 **Video guide** (click to play):
->
-> [![Xcode export settings](xcode-settings-thumb.jpg)](xcode-settings.mp4)
+No plugin files need to be copied — the `NativeCallProxy` Java class ships with the module and is available at runtime automatically. Your Unity C# code calls it via `AndroidJavaClass` (see [Messaging Guide](docs/messaging.md)).
+
+### 2. Unity project — build for your target platform
+
+#### iOS
 
 1. Unity → File → Build Settings → iOS → Build
 2. Open generated Xcode project
 3. Select `NativeCallProxy.h` in Libraries/Plugins/iOS/
 4. Set Target Membership → `UnityFramework` → **Public**
 5. **Select the `Data` folder** in the Project Navigator
-6. In the right panel under **Target Membership**, check **`UnityFramework`** ✅
-   > ⚠️ **This is critical.** Without this, the `Data` folder (which contains `global-metadata.dat` and all Unity assets) will NOT be included inside `UnityFramework.framework`. The app will crash at launch with: `Could not open .../global-metadata.dat — IL2CPP initialization failed`
+6. In the right panel under **Target Membership**, check **`UnityFramework`**
+   > **This is critical.** Without this, the `Data` folder (which contains `global-metadata.dat` and all Unity assets) will NOT be included inside `UnityFramework.framework`. The app will crash at launch with: `Could not open .../global-metadata.dat — IL2CPP initialization failed`
 7. Build `UnityFramework` scheme
 
+#### Android
+
+1. Unity → File → Build Settings → Android
+2. Check **Export Project** (do not "Build" directly — you need the Gradle project)
+3. Set Scripting Backend to **IL2CPP**
+4. Set Target Architectures: **ARMv7** and **ARM64**
+5. Click **Export** and save to a directory (e.g. `unity/builds/android`)
+
 ### 3. Copy build artifacts to your RN project
+
+#### iOS
 
 Create `unity/builds/ios/` in your project root and copy the built framework and static libraries:
 
@@ -111,6 +123,18 @@ The podspec references these files **directly by path** — nothing is copied or
 
 > Custom path? Set `EXPO_UNITY_PATH` environment variable pointing to your Unity build directory, or pass `unityPath` to the config plugin (see step 4).
 
+#### Android
+
+The Unity export directory (containing the `unityLibrary` folder) should be at `unity/builds/android/` in your project root. The config plugin will automatically include the `:unityLibrary` Gradle module.
+
+```bash
+# Verify the structure
+ls unity/builds/android/unityLibrary
+# Should show: libs/  src/  build.gradle  etc.
+```
+
+> Custom path? Set `EXPO_UNITY_ANDROID_PATH` environment variable, or pass `androidUnityPath` to the config plugin.
+
 ### 4. Add the config plugin to `app.json`
 
 ```json
@@ -123,22 +147,37 @@ The podspec references these files **directly by path** — nothing is copied or
 }
 ```
 
-The plugin automatically configures the required Xcode build settings:
+The plugin automatically configures:
+
+**iOS:**
 - `ENABLE_BITCODE = NO` — Unity does not support bitcode
 - `CLANG_CXX_LANGUAGE_STANDARD = c++17` — required for Unity headers
-- `FRAMEWORK_SEARCH_PATHS` — adds the Unity build artifacts directory
+- Embeds `UnityFramework.framework` via a build script phase
 
-If your Unity artifacts are in a custom path, pass the option:
+**Android:**
+- Includes `:unityLibrary` module in `settings.gradle`
+- Adds `flatDir` repository for Unity's native libs
+- Adds `ndk.abiFilters` for `armeabi-v7a` and `arm64-v8a`
+
+If your Unity artifacts are in custom paths:
 
 ```json
-["@dolami-inc/react-native-expo-unity", { "unityPath": "/absolute/path/to/unity/builds/ios" }]
+["@dolami-inc/react-native-expo-unity", {
+  "unityPath": "/absolute/path/to/unity/builds/ios",
+  "androidUnityPath": "/absolute/path/to/unity/builds/android"
+}]
 ```
 
 ### 5. Build
 
 ```bash
+# iOS
 expo prebuild --platform ios --clean
 expo run:ios --device
+
+# Android
+expo prebuild --platform android --clean
+expo run:android
 ```
 
 ## Lifecycle
@@ -189,13 +228,25 @@ public void LoadAvatar(string json) { /* ... */ }
 ### Unity → RN
 
 ```csharp
+// iOS — uses extern "C" DllImport
 #if UNITY_IOS && !UNITY_EDITOR
 [DllImport("__Internal")]
 private static extern void sendMessageToMobileApp(string message);
 #endif
 
-// Recommended: JSON format
-sendMessageToMobileApp("{\"event\":\"image_taken\",\"data\":{\"path\":\"/tmp/photo.jpg\"}}");
+// Android — uses AndroidJavaClass
+private static void SendToMobile(string message) {
+#if UNITY_IOS && !UNITY_EDITOR
+    sendMessageToMobileApp(message);
+#elif UNITY_ANDROID && !UNITY_EDITOR
+    using (var proxy = new AndroidJavaClass("com.expounity.bridge.NativeCallProxy")) {
+        proxy.CallStatic("sendMessageToMobileApp", message);
+    }
+#endif
+}
+
+// Usage:
+SendToMobile("{\"event\":\"image_taken\",\"data\":{\"path\":\"/tmp/photo.jpg\"}}");
 ```
 
 ```tsx
@@ -216,16 +267,17 @@ sendMessageToMobileApp("{\"event\":\"image_taken\",\"data\":{\"path\":\"/tmp/pho
 
 - **Expo SDK 54+**
 - **React Native New Architecture** (Fabric) — old architecture not supported
-- **Physical iOS device** — Unity renders only on device; Simulator shows a placeholder view
-- **Unity build artifacts** — must be copied manually into your project (~2GB, not bundled via npm)
+- **Physical device** — iOS: Unity renders only on device, Simulator shows a placeholder. Android: physical device or emulator with ARM support.
+- **Unity build artifacts** — must be exported/copied manually into your project (not bundled via npm)
 
 ## Platform Support
 
 | Platform | Status |
 |---|---|
-| iOS Device | ✅ Supported |
-| iOS Simulator | ⚠️ Not supported — renders a placeholder view |
-| Android | 🚧 Coming soon |
+| iOS Device | Supported |
+| iOS Simulator | Not supported — renders a placeholder view |
+| Android Device | Supported |
+| Android Emulator | Supported (ARM-based emulators only) |
 
 ## Limitations
 

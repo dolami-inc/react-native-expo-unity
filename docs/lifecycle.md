@@ -118,7 +118,16 @@ useFocusEffect(
 | Unity paused | Same as running (frozen in RAM) |
 | Unity unloaded | ~80-180MB retained (Unity limitation) |
 
-**Paused Unity does not use CPU/GPU.** No battery drain. Only concern is memory pressure — iOS may kill your app if system memory is low.
+**Paused Unity does not use CPU/GPU.** No battery drain. Only concern is memory pressure — the OS may kill your app if system memory is low.
+
+## Platform Notes
+
+The lifecycle behavior is consistent across iOS and Android:
+
+- **iOS:** UnityFramework is loaded from a dynamic framework bundle. The app delegate subscriber handles background/foreground transitions.
+- **Android:** UnityPlayer (which extends `FrameLayout`) is managed by a singleton bridge. Activity lifecycle hooks in the Expo module handle background/foreground transitions.
+
+On both platforms, Unity is a singleton — only one instance exists per app process.
 
 ## Auto vs Manual
 

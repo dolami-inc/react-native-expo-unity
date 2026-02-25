@@ -12,6 +12,7 @@
   "files": [
     "src/",
     "ios/",
+    "android/",
     "plugin/",
     "docs/",
     "app.plugin.js",

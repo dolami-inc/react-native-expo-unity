@@ -1,7 +1,10 @@
 {
-  "platforms": ["ios"],
+  "platforms": ["ios", "android"],
   "ios": {
     "modules": ["ExpoUnityModule"],
     "appDelegateSubscribers": ["ExpoUnityAppDelegateSubscriber"]
+  },
+  "android": {
+    "modules": ["expo.modules.unity.ExpoUnityModule"]
   }
 }

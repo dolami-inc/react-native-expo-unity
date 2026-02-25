@@ -1,0 +1,39 @@
+apply plugin: 'com.android.library'
+apply plugin: 'kotlin-android'
+apply plugin: 'expo-module-gradle-plugin'
+
+group = 'expo.modules.unity'
+version = '0.2.0'
+
+android {
+  namespace "expo.modules.unity"
+  compileSdk 35
+
+  defaultConfig {
+    minSdk 24
+  }
+
+  compileOptions {
+    sourceCompatibility JavaVersion.VERSION_17
+    targetCompatibility JavaVersion.VERSION_17
+  }
+
+  kotlinOptions {
+    jvmTarget = "17"
+  }
+}
+
+// Resolve unity-classes.jar from the Unity Android export.
+// Users set EXPO_UNITY_PATH or it defaults to <rootProject>/unity/builds/android.
+def unityBuildPath = System.getenv("EXPO_UNITY_PATH") ?: "${rootProject.projectDir}/../unity/builds/android"
+def unityClassesJar = file("${unityBuildPath}/unityLibrary/libs/unity-classes.jar")
+
+dependencies {
+  implementation project(':expo-modules-core')
+
+  if (unityClassesJar.exists()) {
+    compileOnly files(unityClassesJar)
+  } else {
+    println "[expo-unity] WARNING: unity-classes.jar not found at ${unityClassesJar}. Android build will fail if Unity symbols are referenced."
+  }
+}

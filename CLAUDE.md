@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-react-native-expo-unity is an Expo module that embeds Unity as a Library (UaaL) into React Native / Expo apps. It provides a React component (`<UnityView />`) and imperative APIs for bidirectional messaging and lifecycle control between React Native and Unity. Currently iOS-only (physical devices, no simulator).
+react-native-expo-unity is an Expo module that embeds Unity as a Library (UaaL) into React Native / Expo apps. It provides a React component (`<UnityView />`) and imperative APIs for bidirectional messaging and lifecycle control between React Native and Unity. Supports both iOS (physical devices only) and Android.
 
 ## Build & Development Commands
 
@@ -38,18 +38,27 @@ There are no test scripts, linters, or formatters configured in this project.
 - `UnityBridge.h/.mm` — Objective-C++ singleton managing UnityFramework lifecycle (init, message routing, pause/unload)
 - `ExpoUnity.podspec` — CocoaPods spec linking Unity build artifacts and static libraries
 
+**Android Native Layer** (`android/`):
+- `ExpoUnityModule.kt` — Expo Modules Kotlin integration exposing functions, events, view, and lifecycle hooks to JS
+- `ExpoUnityView.kt` — Native view extending `ExpoView`, mounts UnityPlayer as child FrameLayout
+- `UnityBridge.kt` — Kotlin singleton managing UnityPlayer lifecycle (init, message routing, pause/unload), implements `IUnityPlayerLifecycleEvents`
+- `NativeCallProxy.java` (`com.expounity.bridge`) — Static Java bridge for Unity→RN messaging, called from Unity C# via `AndroidJavaClass`
+- `build.gradle` — Gradle build script resolving `unity-classes.jar` as `compileOnly` dependency
+
 **Plugin Files** (`plugin/`):
-- `NativeCallProxy.h/.mm` — Bidirectional communication protocol files that users copy into their Unity project's `Assets/Plugins/iOS/`
+- `NativeCallProxy.h/.mm` — iOS bidirectional communication protocol files that users copy into their Unity project's `Assets/Plugins/iOS/`
 
 ### Key Patterns
 
-- **Singleton**: `UnityBridge` is a global singleton — only one Unity instance per app
-- **Event Flow**: RN→Unity via `sendMessageToGOWithName:functionName:message:` on UnityFramework; Unity→RN via extern "C" `sendMessageToMobileApp` → `NativeCallsProtocol` → EventDispatcher → `onUnityMessage` prop
+- **Singleton**: `UnityBridge` is a global singleton on both platforms — only one Unity instance per app
+- **Event Flow (iOS)**: RN→Unity via `sendMessageToGOWithName:functionName:message:` on UnityFramework; Unity→RN via extern "C" `sendMessageToMobileApp` → `NativeCallsProtocol` → EventDispatcher → `onUnityMessage` prop
+- **Event Flow (Android)**: RN→Unity via `UnityPlayer.UnitySendMessage()`; Unity→RN via `AndroidJavaClass("com.expounity.bridge.NativeCallProxy")` → `MessageListener` → EventDispatcher → `onUnityMessage` prop
 - **Lifecycle States**: NotInitialized → Running ↔ Paused → Unloaded. View mount triggers init, `autoUnloadOnUnmount` (default true) controls cleanup behavior
-- **Unity artifacts**: UnityFramework.framework + static libs (.a files) are manually copied by users; path configurable via `EXPO_UNITY_PATH` env var (defaults to `unity/builds/ios/`)
+- **Unity artifacts (iOS)**: UnityFramework.framework + static libs (.a files) are manually copied by users; path configurable via `EXPO_UNITY_PATH` env var (defaults to `unity/builds/ios/`)
+- **Unity artifacts (Android)**: Unity "Export Project" output (containing `unityLibrary/`) placed at path configurable via `EXPO_UNITY_ANDROID_PATH` env var (defaults to `unity/builds/android/`)
 
 ### Platform Requirements
 
 - Expo >= 54.0, New Architecture (Fabric) required
-- iOS physical device only (no simulator support)
-- iOS 15.1 minimum, C++17, bitcode disabled
+- iOS physical device only (no simulator support), iOS 15.1 minimum, C++17, bitcode disabled
+- Android minSdk 24, physical device or ARM-based emulator

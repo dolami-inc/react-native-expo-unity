@@ -44,15 +44,25 @@ public static class RNBridge
     private static extern void sendMessageToMobileApp(string message);
     #endif
 
+    /// Send a raw string message to React Native
+    public static void Send(string message)
+    {
+        #if UNITY_IOS && !UNITY_EDITOR
+        sendMessageToMobileApp(message);
+        #elif UNITY_ANDROID && !UNITY_EDITOR
+        using (var proxy = new AndroidJavaClass("com.expounity.bridge.NativeCallProxy"))
+        {
+            proxy.CallStatic("sendMessageToMobileApp", message);
+        }
+        #endif
+    }
+
     /// Send a structured event to React Native
     public static void SendEvent(string eventName, object data = null)
     {
         var msg = new EventMessage { @event = eventName, data = data };
         string json = JsonUtility.ToJson(msg);
-
-        #if UNITY_IOS && !UNITY_EDITOR
-        sendMessageToMobileApp(json);
-        #endif
+        Send(json);
     }
 
     [System.Serializable]
@@ -68,10 +78,16 @@ public static class RNBridge
 // RNBridge.SendEvent("image_taken", new { path = "/tmp/photo.jpg", w = 828, h = 1792 });
 ```
 
+### Platform Details
+
+**iOS:** The `sendMessageToMobileApp` function is defined as an `extern "C"` symbol in the `NativeCallProxy.mm` file that you copy into your Unity project's `Assets/Plugins/iOS/`. At runtime, UnityBridge registers itself as the `NativeCallsProtocol` handler and receives the message.
+
+**Android:** The `NativeCallProxy` Java class ships with the module at `com.expounity.bridge.NativeCallProxy`. Unity C# code calls it via `AndroidJavaClass` — no additional plugin files need to be copied. At runtime, `UnityBridge` registers itself as a `MessageListener` and receives the message.
+
 ## React Native Implementation
 
 ```tsx
-import { UnityView } from "react-native-expo-unity";
+import { UnityView } from "@dolami-inc/react-native-expo-unity";
 
 interface UnityEvent<T = unknown> {
   event: string;

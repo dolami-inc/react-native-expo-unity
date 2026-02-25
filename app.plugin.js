@@ -1,22 +1,36 @@
-const { withXcodeProject } = require('@expo/config-plugins');
+const {
+  withXcodeProject,
+  withSettingsGradle,
+  withAppBuildGradle,
+} = require('@expo/config-plugins');
 const path = require('path');
 const fs = require('fs');
 
 /**
  * Expo Config Plugin for @dolami-inc/react-native-expo-unity.
  *
+ * iOS:
  * - Injects required Xcode build settings (bitcode, C++17)
  * - Adds a build phase that embeds UnityFramework.framework into the app
  *   bundle at build time (device builds only)
  *
+ * Android:
+ * - Includes the :unityLibrary Gradle module from the Unity export
+ * - Adds flatDir repos for Unity's .aar/.jar libs
+ * - Adds the unityLibrary dependency and NDK abiFilters
+ *
  * @param {object} config - Expo config
- * @param {{ unityPath?: string }} options
- *   unityPath — absolute path to the Unity iOS build artifacts directory.
- *   Defaults to `<projectRoot>/unity/builds/ios`.
+ * @param {object} options
+ * @param {string} [options.unityPath] — absolute path to the Unity iOS build
+ *   artifacts directory. Defaults to `<projectRoot>/unity/builds/ios`.
  *   Can also be set via the EXPO_UNITY_PATH environment variable.
+ * @param {string} [options.androidUnityPath] — absolute path to the Unity
+ *   Android export directory. Defaults to `<projectRoot>/unity/builds/android`.
+ *   Can also be set via the EXPO_UNITY_ANDROID_PATH environment variable.
  */
 const withExpoUnity = (config, options = {}) => {
-  return withXcodeProject(config, (config) => {
+  // -- iOS --
+  config = withXcodeProject(config, (config) => {
     const xcodeProject = config.modResults;
     const projectRoot = config.modRequest.projectRoot;
 
@@ -25,7 +39,7 @@ const withExpoUnity = (config, options = {}) => {
       process.env.EXPO_UNITY_PATH ||
       path.join(projectRoot, 'unity', 'builds', 'ios');
 
-    // -- Build settings --
+    // Build settings
     const configurations = xcodeProject.pbxXCBuildConfigurationSection();
     for (const key of Object.keys(configurations)) {
       const configuration = configurations[key];
@@ -37,16 +51,11 @@ const withExpoUnity = (config, options = {}) => {
       settings['CLANG_CXX_LANGUAGE_STANDARD'] = '"c++17"';
     }
 
-    // -- Embed UnityFramework via build script phase --
-    // UnityFramework is a dynamic framework that must be embedded (copied)
-    // into the app bundle's Frameworks/ directory, otherwise dyld fails at
-    // launch. We use a shell script build phase instead of vendored_frameworks
-    // because the pod source may live in a read-only package manager cache.
+    // Embed UnityFramework via build script phase
     const frameworkSrc = path.join(unityPath, 'UnityFramework.framework');
     if (fs.existsSync(frameworkSrc)) {
       const target = xcodeProject.getFirstTarget();
 
-      // Shell script that copies and codesigns the framework (device only).
       const script = [
         'if [ "${PLATFORM_NAME}" = "iphoneos" ]; then',
         '  FRAMEWORK_SRC="' + frameworkSrc + '"',
@@ -73,6 +82,88 @@ const withExpoUnity = (config, options = {}) => {
 
     return config;
   });
+
+  // -- Android: settings.gradle --
+  config = withSettingsGradle(config, (config) => {
+    const projectRoot = config.modRequest.projectRoot;
+    const androidUnityPath =
+      options.androidUnityPath ||
+      process.env.EXPO_UNITY_ANDROID_PATH ||
+      path.join(projectRoot, 'unity', 'builds', 'android');
+
+    const contents = config.modResults.contents;
+
+    // Include :unityLibrary module
+    const includeSnippet = `include ':unityLibrary'`;
+    const projectSnippet = `project(':unityLibrary').projectDir = new File('${androidUnityPath}/unityLibrary')`;
+
+    if (!contents.includes(includeSnippet)) {
+      config.modResults.contents =
+        contents +
+        `\n// Unity as a Library\n${includeSnippet}\n${projectSnippet}\n`;
+    }
+
+    // Add flatDir repos for Unity's native libs
+    const flatDirSnippet = `flatDir { dirs "\${project(':unityLibrary').projectDir}/libs" }`;
+    if (!config.modResults.contents.includes(flatDirSnippet)) {
+      // Insert into dependencyResolutionManagement.repositories or allprojects.repositories
+      const repoBlockRegex =
+        /dependencyResolutionManagement\s*\{[\s\S]*?repositories\s*\{/;
+      const allProjectsRegex = /allprojects\s*\{[\s\S]*?repositories\s*\{/;
+
+      if (repoBlockRegex.test(config.modResults.contents)) {
+        config.modResults.contents = config.modResults.contents.replace(
+          repoBlockRegex,
+          (match) => `${match}\n        ${flatDirSnippet}`
+        );
+      } else if (allProjectsRegex.test(config.modResults.contents)) {
+        config.modResults.contents = config.modResults.contents.replace(
+          allProjectsRegex,
+          (match) => `${match}\n        ${flatDirSnippet}`
+        );
+      } else {
+        // Fallback: append a standalone block
+        config.modResults.contents +=
+          `\nallprojects {\n    repositories {\n        ${flatDirSnippet}\n    }\n}\n`;
+      }
+    }
+
+    return config;
+  });
+
+  // -- Android: app/build.gradle --
+  config = withAppBuildGradle(config, (config) => {
+    let contents = config.modResults.contents;
+
+    // Add unityLibrary dependency
+    const depSnippet = `implementation project(':unityLibrary')`;
+    if (!contents.includes(depSnippet)) {
+      const depsRegex = /dependencies\s*\{/;
+      if (depsRegex.test(contents)) {
+        contents = contents.replace(
+          depsRegex,
+          (match) => `${match}\n    ${depSnippet}`
+        );
+      }
+    }
+
+    // Add NDK abiFilters
+    const abiSnippet = `ndk { abiFilters 'armeabi-v7a', 'arm64-v8a' }`;
+    if (!contents.includes('abiFilters')) {
+      const defaultConfigRegex = /defaultConfig\s*\{/;
+      if (defaultConfigRegex.test(contents)) {
+        contents = contents.replace(
+          defaultConfigRegex,
+          (match) => `${match}\n        ${abiSnippet}`
+        );
+      }
+    }
+
+    config.modResults.contents = contents;
+    return config;
+  });
+
+  return config;
 };
 
 module.exports = withExpoUnity;
