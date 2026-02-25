@@ -1,6 +1,7 @@
 const {
   withXcodeProject,
   withSettingsGradle,
+  withProjectBuildGradle,
   withAppBuildGradle,
 } = require('@expo/config-plugins');
 const path = require('path');
@@ -15,9 +16,9 @@ const fs = require('fs');
  *   bundle at build time (device builds only)
  *
  * Android:
- * - Includes the :unityLibrary Gradle module from the Unity export
- * - Adds flatDir repos for Unity's .aar/.jar libs
- * - Adds the unityLibrary dependency and NDK abiFilters
+ * - Includes the :unityLibrary Gradle module in settings.gradle
+ * - Adds flatDir repos for Unity's .aar/.jar libs in root build.gradle
+ * - Adds the unityLibrary dependency and NDK abiFilters in app/build.gradle
  *
  * @param {object} config - Expo config
  * @param {object} options
@@ -83,7 +84,7 @@ const withExpoUnity = (config, options = {}) => {
     return config;
   });
 
-  // -- Android: settings.gradle --
+  // -- Android: settings.gradle (include :unityLibrary module) --
   config = withSettingsGradle(config, (config) => {
     const projectRoot = config.modRequest.projectRoot;
     const androidUnityPath =
@@ -103,28 +104,22 @@ const withExpoUnity = (config, options = {}) => {
         `\n// Unity as a Library\n${includeSnippet}\n${projectSnippet}\n`;
     }
 
-    // Add flatDir repos for Unity's native libs
+    return config;
+  });
+
+  // -- Android: build.gradle (flatDir repos for Unity's native libs) --
+  // This must go in the root build.gradle (not settings.gradle) because
+  // `allprojects` is not a valid method in settings.gradle on Gradle 8+.
+  config = withProjectBuildGradle(config, (config) => {
     const flatDirSnippet = `flatDir { dirs "\${project(':unityLibrary').projectDir}/libs" }`;
     if (!config.modResults.contents.includes(flatDirSnippet)) {
-      // Insert into dependencyResolutionManagement.repositories or allprojects.repositories
-      const repoBlockRegex =
-        /dependencyResolutionManagement\s*\{[\s\S]*?repositories\s*\{/;
       const allProjectsRegex = /allprojects\s*\{[\s\S]*?repositories\s*\{/;
 
-      if (repoBlockRegex.test(config.modResults.contents)) {
-        config.modResults.contents = config.modResults.contents.replace(
-          repoBlockRegex,
-          (match) => `${match}\n        ${flatDirSnippet}`
-        );
-      } else if (allProjectsRegex.test(config.modResults.contents)) {
+      if (allProjectsRegex.test(config.modResults.contents)) {
         config.modResults.contents = config.modResults.contents.replace(
           allProjectsRegex,
           (match) => `${match}\n        ${flatDirSnippet}`
         );
-      } else {
-        // Fallback: append a standalone block
-        config.modResults.contents +=
-          `\nallprojects {\n    repositories {\n        ${flatDirSnippet}\n    }\n}\n`;
       }
     }
 
