@@ -3,9 +3,31 @@ const {
   withSettingsGradle,
   withProjectBuildGradle,
   withAppBuildGradle,
+  withGradleProperties,
 } = require('@expo/config-plugins');
 const path = require('path');
 const fs = require('fs');
+
+/**
+ * Parse a Java .properties file into an array of { type, key, value } entries.
+ */
+function parsePropertiesFile(filePath) {
+  if (!fs.existsSync(filePath)) return [];
+  const lines = fs.readFileSync(filePath, 'utf8').split('\n');
+  const entries = [];
+  for (const line of lines) {
+    const trimmed = line.trim();
+    if (!trimmed || trimmed.startsWith('#') || trimmed.startsWith('!')) continue;
+    const eqIndex = trimmed.indexOf('=');
+    if (eqIndex === -1) continue;
+    entries.push({
+      type: 'property',
+      key: trimmed.slice(0, eqIndex).trim(),
+      value: trimmed.slice(eqIndex + 1).trim(),
+    });
+  }
+  return entries;
+}
 
 /**
  * Expo Config Plugin for @dolami-inc/react-native-expo-unity.
@@ -17,6 +39,7 @@ const fs = require('fs');
  *
  * Android:
  * - Includes the :unityLibrary Gradle module and .androidlib subprojects in settings.gradle
+ * - Copies Unity gradle properties (unity.*, unityStreamingAssets) to host gradle.properties
  * - Adds flatDir repos for Unity's .aar/.jar libs in root build.gradle
  * - Adds the unityLibrary dependency and NDK abiFilters in app/build.gradle
  *
@@ -115,6 +138,40 @@ const withExpoUnity = (config, options = {}) => {
         if (!config.modResults.contents.includes(subInclude)) {
           config.modResults.contents += `${subInclude}\n`;
         }
+      }
+    }
+
+    return config;
+  });
+
+  // -- Android: gradle.properties (copy Unity properties to host project) --
+  // Unity's build.gradle references properties like `unityStreamingAssets` and
+  // `unity.*` that are defined in the Unity export's gradle.properties. When the
+  // unityLibrary is included as a subproject, it inherits the host's properties,
+  // so we need to copy the required ones over.
+  config = withGradleProperties(config, (config) => {
+    const projectRoot = config.modRequest.projectRoot;
+    const androidUnityPath =
+      options.androidUnityPath ||
+      process.env.EXPO_UNITY_ANDROID_PATH ||
+      path.join(projectRoot, 'unity', 'builds', 'android');
+
+    const unityPropsPath = path.join(androidUnityPath, 'gradle.properties');
+    const unityProps = parsePropertiesFile(unityPropsPath);
+
+    // Only copy unity-specific properties (unity.* and unityStreamingAssets)
+    const existingKeys = new Set(
+      config.modResults
+        .filter((p) => p.type === 'property')
+        .map((p) => p.key)
+    );
+
+    for (const prop of unityProps) {
+      if (
+        (prop.key.startsWith('unity.') || prop.key === 'unityStreamingAssets' || prop.key === 'unityTemplateVersion') &&
+        !existingKeys.has(prop.key)
+      ) {
+        config.modResults.push(prop);
       }
     }
 
