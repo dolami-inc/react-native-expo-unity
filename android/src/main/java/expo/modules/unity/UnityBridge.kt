@@ -4,15 +4,20 @@ import android.app.Activity
 import android.os.Handler
 import android.os.Looper
 import android.util.Log
+import android.view.SurfaceView
 import android.view.View
+import android.widget.FrameLayout
 import com.expounity.bridge.NativeCallProxy
 import com.unity3d.player.IUnityPlayerLifecycleEvents
 import com.unity3d.player.UnityPlayer
-import com.unity3d.player.UnityPlayerForActivityOrService
+import com.unity3d.player.UnityPlayerForGameActivity
 
 /**
  * Singleton managing the UnityPlayer lifecycle.
  * Android equivalent of ios/UnityBridge.mm.
+ *
+ * Unity 6+ uses GameActivity mode. UnityPlayerForGameActivity requires
+ * a FrameLayout container and SurfaceView that it renders into.
  */
 class UnityBridge private constructor() : IUnityPlayerLifecycleEvents, NativeCallProxy.MessageListener {
 
@@ -35,6 +40,9 @@ class UnityBridge private constructor() : IUnityPlayerLifecycleEvents, NativeCal
     var unityPlayer: UnityPlayer? = null
         private set
 
+    /** The FrameLayout container that Unity renders into. */
+    private var containerView: FrameLayout? = null
+
     var onMessage: ((String) -> Unit)? = null
 
     /** Tracked here (not on the Module) so it survives module recreation. */
@@ -44,29 +52,43 @@ class UnityBridge private constructor() : IUnityPlayerLifecycleEvents, NativeCal
         get() = unityPlayer != null
 
     /**
-     * Returns the UnityPlayer's FrameLayout container for embedding.
-     * Unity 6+ made UnityPlayer abstract; getFrameLayout() returns the full
-     * container with the rendering surface inside it.
+     * Returns the FrameLayout container that holds Unity's rendering surface.
      */
     val unityPlayerView: View?
-        get() = unityPlayer?.frameLayout
+        get() = containerView
 
     fun initialize(activity: Activity) {
         if (isInitialized) return
 
         val runInit = Runnable {
             try {
-                val player = UnityPlayerForActivityOrService(activity, this)
-                unityPlayer = player
+                // Create the container and surface that Unity will render into
+                val frameLayout = FrameLayout(activity)
+                frameLayout.layoutParams = FrameLayout.LayoutParams(
+                    FrameLayout.LayoutParams.MATCH_PARENT,
+                    FrameLayout.LayoutParams.MATCH_PARENT
+                )
 
-                // Start Unity rendering — without these calls the player
-                // stays in a paused/unfocused state and shows a blank screen.
+                val surfaceView = SurfaceView(activity)
+                frameLayout.addView(
+                    surfaceView,
+                    FrameLayout.LayoutParams(
+                        FrameLayout.LayoutParams.MATCH_PARENT,
+                        FrameLayout.LayoutParams.MATCH_PARENT
+                    )
+                )
+
+                val player = UnityPlayerForGameActivity(activity, frameLayout, surfaceView, this)
+                unityPlayer = player
+                containerView = frameLayout
+
+                // Start Unity rendering
                 player.resume()
                 player.windowFocusChanged(true)
 
                 NativeCallProxy.registerListener(this)
 
-                Log.i(TAG, "Unity initialized")
+                Log.i(TAG, "Unity initialized (GameActivity mode)")
             } catch (e: Exception) {
                 Log.e(TAG, "Failed to initialize Unity", e)
             }
@@ -119,11 +141,13 @@ class UnityBridge private constructor() : IUnityPlayerLifecycleEvents, NativeCal
     override fun onUnityPlayerUnloaded() {
         Log.i(TAG, "onUnityPlayerUnloaded")
         unityPlayer = null
+        containerView = null
     }
 
     override fun onUnityPlayerQuitted() {
         Log.i(TAG, "onUnityPlayerQuitted")
         unityPlayer = null
+        containerView = null
     }
 
     // NativeCallProxy.MessageListener (Unity -> RN)
