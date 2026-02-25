@@ -2,8 +2,10 @@ apply plugin: 'com.android.library'
 apply plugin: 'kotlin-android'
 apply plugin: 'expo-module-gradle-plugin'
 
+def packageJson = new groovy.json.JsonSlurper().parse(file("../package.json"))
+
 group = 'expo.modules.unity'
-version = '0.2.0'
+version = packageJson.version
 
 android {
   namespace "expo.modules.unity"
@@ -12,7 +14,7 @@ android {
   defaultConfig {
     minSdk 24
     versionCode 1
-    versionName "1.0.0"
+    versionName packageJson.version
   }
 
   compileOptions {
