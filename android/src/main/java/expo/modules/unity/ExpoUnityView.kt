@@ -18,9 +18,6 @@ class ExpoUnityView(context: Context, appContext: AppContext) : ExpoView(context
     var autoUnloadOnUnmount: Boolean = true
 
     init {
-        // post {} dispatches to main thread. setupUnity -> initialize runs
-        // synchronously when already on main thread, so mountUnityView sees the
-        // fully-initialized player without a race condition.
         post { setupUnity() }
     }
 
@@ -61,6 +58,18 @@ class ExpoUnityView(context: Context, appContext: AppContext) : ExpoView(context
                 FrameLayout.LayoutParams.MATCH_PARENT
             )
         )
+
+        Log.i(TAG, "Unity view mounted")
+    }
+
+    override fun onAttachedToWindow() {
+        super.onAttachedToWindow()
+        // Start rendering after the view is in the window hierarchy,
+        // so Unity's surface is properly connected to the display.
+        val bridge = UnityBridge.getInstance()
+        if (bridge.isInitialized) {
+            bridge.startRendering()
+        }
     }
 
     override fun onDetachedFromWindow() {
