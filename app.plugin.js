@@ -4,6 +4,7 @@ const {
   withProjectBuildGradle,
   withAppBuildGradle,
   withGradleProperties,
+  withDangerousMod,
 } = require('@expo/config-plugins');
 const path = require('path');
 const fs = require('fs');
@@ -41,6 +42,7 @@ function parsePropertiesFile(filePath) {
  * - Includes the :unityLibrary Gradle module and .androidlib subprojects in settings.gradle
  * - Copies Unity gradle properties (unity.*, unityStreamingAssets) to host gradle.properties
  * - Adds flatDir repos for Unity's .aar/.jar libs in root build.gradle
+ * - Strips LAUNCHER intent from Unity's AndroidManifest (prevents duplicate app icon)
  * - Adds the unityLibrary dependency and NDK abiFilters in app/build.gradle
  *
  * @param {object} config - Expo config
@@ -143,6 +145,49 @@ const withExpoUnity = (config, options = {}) => {
 
     return config;
   });
+
+  // -- Android: Strip LAUNCHER intent from Unity's AndroidManifest --
+  // Unity exports include a LAUNCHER intent filter on UnityPlayerGameActivity,
+  // which creates a duplicate app icon. Since Unity is embedded (not standalone),
+  // we remove it so only the host app's launcher entry exists.
+  config = withDangerousMod(config, [
+    'android',
+    (config) => {
+      const projectRoot = config.modRequest.projectRoot;
+      const androidUnityPath =
+        options.androidUnityPath ||
+        process.env.EXPO_UNITY_ANDROID_PATH ||
+        path.join(projectRoot, 'unity', 'builds', 'android');
+
+      const manifestPath = path.join(
+        androidUnityPath,
+        'unityLibrary',
+        'src',
+        'main',
+        'AndroidManifest.xml'
+      );
+
+      if (fs.existsSync(manifestPath)) {
+        let manifest = fs.readFileSync(manifestPath, 'utf8');
+
+        // Remove the entire <intent-filter> block containing LAUNCHER
+        const launcherRegex =
+          /\s*<intent-filter>\s*<category[^>]*LAUNCHER[^>]*\/>\s*<action[^>]*MAIN[^>]*\/>\s*<\/intent-filter>/g;
+        const altLauncherRegex =
+          /\s*<intent-filter>\s*<action[^>]*MAIN[^>]*\/>\s*<category[^>]*LAUNCHER[^>]*\/>\s*<\/intent-filter>/g;
+
+        const patched = manifest
+          .replace(launcherRegex, '')
+          .replace(altLauncherRegex, '');
+
+        if (patched !== manifest) {
+          fs.writeFileSync(manifestPath, patched, 'utf8');
+        }
+      }
+
+      return config;
+    },
+  ]);
 
   // -- Android: gradle.properties (copy Unity properties to host project) --
   // Unity's build.gradle references properties like `unityStreamingAssets` and
