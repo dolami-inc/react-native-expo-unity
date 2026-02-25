@@ -8,6 +8,7 @@ import android.view.View
 import com.expounity.bridge.NativeCallProxy
 import com.unity3d.player.IUnityPlayerLifecycleEvents
 import com.unity3d.player.UnityPlayer
+import com.unity3d.player.UnityPlayerForActivityOrService
 
 /**
  * Singleton managing the UnityPlayer lifecycle.
@@ -43,17 +44,18 @@ class UnityBridge private constructor() : IUnityPlayerLifecycleEvents, NativeCal
         get() = unityPlayer != null
 
     /**
-     * Returns the UnityPlayer view for embedding. UnityPlayer extends FrameLayout.
+     * Returns the UnityPlayer view for embedding.
+     * Unity 6+ made UnityPlayer abstract; use getView() to get the renderable view.
      */
     val unityPlayerView: View?
-        get() = unityPlayer
+        get() = unityPlayer?.view
 
     fun initialize(activity: Activity) {
         if (isInitialized) return
 
         val runInit = Runnable {
             try {
-                val player = UnityPlayer(activity, this)
+                val player = UnityPlayerForActivityOrService(activity, this)
                 unityPlayer = player
 
                 NativeCallProxy.registerListener(this)
