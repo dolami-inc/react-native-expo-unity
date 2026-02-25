@@ -2,8 +2,6 @@ package expo.modules.unity
 
 import android.content.Context
 import android.util.Log
-import android.view.ViewGroup
-import android.widget.FrameLayout
 import expo.modules.kotlin.AppContext
 import expo.modules.kotlin.viewevent.EventDispatcher
 import expo.modules.kotlin.views.ExpoView
@@ -29,47 +27,32 @@ class ExpoUnityView(context: Context, appContext: AppContext) : ExpoView(context
 
         val bridge = UnityBridge.getInstance()
 
-        if (!bridge.isInitialized) {
-            bridge.initialize(activity)
-        }
-
         bridge.onMessage = { message ->
             post {
                 onUnityMessage(mapOf("message" to message))
             }
         }
 
-        mountUnityView()
-    }
-
-    private fun mountUnityView() {
-        val playerView = UnityBridge.getInstance().unityPlayerView ?: run {
-            Log.w(TAG, "Unity player view not available yet")
-            return
+        if (bridge.isReady) {
+            // Unity already initialized — just reparent the view into this container
+            bridge.addUnityViewToGroup(this)
+            Log.i(TAG, "Unity already ready, reparented view")
+        } else {
+            // Initialize Unity with a callback that reparents when ready
+            bridge.initialize(activity) {
+                post {
+                    bridge.addUnityViewToGroup(this)
+                    Log.i(TAG, "Unity ready, view reparented into container")
+                }
+            }
         }
-
-        // Remove from previous parent if needed
-        (playerView.parent as? ViewGroup)?.removeView(playerView)
-
-        addView(
-            playerView,
-            FrameLayout.LayoutParams(
-                FrameLayout.LayoutParams.MATCH_PARENT,
-                FrameLayout.LayoutParams.MATCH_PARENT
-            )
-        )
-
-        Log.i(TAG, "Unity view mounted")
     }
 
-    override fun onAttachedToWindow() {
-        super.onAttachedToWindow()
-        // Start rendering after the view is in the window hierarchy,
-        // so Unity's surface is properly connected to the display.
+    override fun onWindowFocusChanged(hasWindowFocus: Boolean) {
+        super.onWindowFocusChanged(hasWindowFocus)
         val bridge = UnityBridge.getInstance()
-        if (bridge.isInitialized) {
-            bridge.startRendering()
-        }
+        if (!bridge.isReady) return
+        bridge.unityPlayer?.windowFocusChanged(hasWindowFocus)
     }
 
     override fun onDetachedFromWindow() {
@@ -81,8 +64,10 @@ class ExpoUnityView(context: Context, appContext: AppContext) : ExpoView(context
                 bridge.unload()
                 Log.i(TAG, "Auto-unloaded (view detached)")
             } else {
+                // Park Unity in the background instead of unloading
+                bridge.parkUnityViewInBackground()
                 bridge.setPaused(true)
-                Log.i(TAG, "Auto-paused on unmount (autoUnloadOnUnmount=false)")
+                Log.i(TAG, "Parked in background (autoUnloadOnUnmount=false)")
             }
         }
 
