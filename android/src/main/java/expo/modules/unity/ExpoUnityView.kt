@@ -33,13 +33,17 @@ class ExpoUnityView(context: Context, appContext: AppContext) : ExpoView(context
             }
         }
 
-        if (bridge.isInitialized) {
-            // Unity already created — attach the view to this container
-            bridge.attachToContainer(this)
+        if (bridge.isReady) {
+            // Unity already initialized — reparent into this container
+            bridge.reparentInto(this)
         } else {
-            // Create Unity player, then attach the view once ready
+            // Initialize Unity, then reparent once engine is ready.
+            // Use postDelayed to give the engine time to boot before
+            // reparenting (avoids window detach timeout).
             bridge.initialize(activity) {
-                bridge.attachToContainer(this)
+                postDelayed({
+                    bridge.reparentInto(this)
+                }, 3000)
             }
         }
     }
@@ -47,7 +51,7 @@ class ExpoUnityView(context: Context, appContext: AppContext) : ExpoView(context
     override fun onWindowFocusChanged(hasWindowFocus: Boolean) {
         super.onWindowFocusChanged(hasWindowFocus)
         val bridge = UnityBridge.getInstance()
-        if (!bridge.isInitialized) return
+        if (!bridge.isReady) return
         bridge.unityPlayer?.windowFocusChanged(hasWindowFocus)
     }
 
@@ -57,7 +61,7 @@ class ExpoUnityView(context: Context, appContext: AppContext) : ExpoView(context
 
         if (bridge.isInitialized) {
             if (autoUnloadOnUnmount) {
-                bridge.detachFromContainer()
+                bridge.detachView()
                 bridge.unload()
                 Log.i(TAG, "Detached and unloaded (view detached)")
             } else {

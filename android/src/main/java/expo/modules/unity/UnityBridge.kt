@@ -18,9 +18,9 @@ import com.unity3d.player.UnityPlayerForActivityOrService
  * Singleton managing the UnityPlayer lifecycle.
  * Android equivalent of ios/UnityBridge.mm.
  *
- * Creates the Unity player and lets the ExpoUnityView add the
- * FrameLayout directly — no background parking, since Unity 6's
- * window management times out when reparenting from a background view.
+ * Unity 6's engine only boots when the view is in the Activity's content
+ * view hierarchy. We park the view at MATCH_PARENT behind everything (Z=-1)
+ * to let the engine start, then reparent into the React Native container.
  */
 class UnityBridge private constructor() : IUnityPlayerLifecycleEvents, NativeCallProxy.MessageListener {
 
@@ -48,19 +48,18 @@ class UnityBridge private constructor() : IUnityPlayerLifecycleEvents, NativeCal
     /** Tracked here (not on the Module) so it survives module recreation. */
     var wasRunningBeforeBackground: Boolean = false
 
+    var isReady: Boolean = false
+        private set
+
     val isInitialized: Boolean
         get() = unityPlayer != null
 
-    /**
-     * Returns the UnityPlayer's FrameLayout for embedding.
-     * UnityPlayerForActivityOrService creates its own rendering surface internally.
-     */
     val unityPlayerView: FrameLayout?
         get() = unityPlayer?.frameLayout
 
     /**
-     * Creates the UnityPlayer. The caller is responsible for adding
-     * [unityPlayerView] to the view hierarchy immediately after [onReady] fires.
+     * Creates the Unity player, parks it in the Activity's content view
+     * (behind everything) to let the engine start, then fires [onReady].
      */
     fun initialize(activity: Activity, onReady: (() -> Unit)? = null) {
         if (isInitialized) {
@@ -70,10 +69,8 @@ class UnityBridge private constructor() : IUnityPlayerLifecycleEvents, NativeCal
 
         val runInit = Runnable {
             try {
-                // Set RGBA_8888 format for proper rendering
                 activity.window.setFormat(PixelFormat.RGBA_8888)
 
-                // Save fullscreen state before Unity potentially changes it
                 val flags = activity.window.attributes.flags
                 val wasFullScreen = (flags and WindowManager.LayoutParams.FLAG_FULLSCREEN) != 0
 
@@ -83,11 +80,30 @@ class UnityBridge private constructor() : IUnityPlayerLifecycleEvents, NativeCal
                 NativeCallProxy.registerListener(this)
                 Log.i(TAG, "Unity player created")
 
-                // Restore fullscreen state if Unity changed it
+                // Park in Activity's content view at full size but behind
+                // everything. Unity's engine only starts when the view is
+                // in the Activity's window hierarchy.
+                val frame = player.frameLayout
+                frame.z = -1f
+                activity.addContentView(frame, ViewGroup.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT,
+                    ViewGroup.LayoutParams.MATCH_PARENT
+                ))
+                Log.i(TAG, "Unity view parked in Activity (background)")
+
+                // Start the rendering pipeline
+                player.windowFocusChanged(true)
+                frame.requestFocus()
+                player.resume()
+
+                // Restore fullscreen state
                 if (!wasFullScreen) {
                     activity.window.addFlags(WindowManager.LayoutParams.FLAG_FORCE_NOT_FULLSCREEN)
                     activity.window.clearFlags(WindowManager.LayoutParams.FLAG_FULLSCREEN)
                 }
+
+                isReady = true
+                Log.i(TAG, "Unity initialized and ready")
 
                 onReady?.invoke()
             } catch (e: Exception) {
@@ -103,42 +119,46 @@ class UnityBridge private constructor() : IUnityPlayerLifecycleEvents, NativeCal
     }
 
     /**
-     * Adds the Unity FrameLayout to the given container and starts rendering.
-     * Must be called after [initialize] completes.
+     * Moves the Unity view from the Activity background into the given
+     * container. Called when the React Native component is ready to show Unity.
      */
-    fun attachToContainer(container: ViewGroup) {
+    fun reparentInto(container: ViewGroup) {
         val frame = unityPlayerView ?: run {
             Log.w(TAG, "Unity player view not available")
             return
         }
 
-        // Remove from current parent if any
-        (frame.parent as? ViewGroup)?.removeView(frame)
+        // Remove from Activity's content view
+        (frame.parent as? ViewGroup)?.let { parent ->
+            parent.endViewTransition(frame)
+            parent.removeView(frame)
+        }
 
-        val layoutParams = FrameLayout.LayoutParams(
+        // Reset Z and add to the React Native container
+        frame.z = 0f
+        container.addView(frame, 0, FrameLayout.LayoutParams(
             FrameLayout.LayoutParams.MATCH_PARENT,
             FrameLayout.LayoutParams.MATCH_PARENT
-        )
-        container.addView(frame, 0, layoutParams)
-        Log.i(TAG, "Unity view attached to container")
+        ))
 
-        // Kick-start rendering after the view is in the hierarchy.
-        // Use post to let the layout pass complete first.
-        frame.post {
-            unityPlayer?.windowFocusChanged(true)
-            frame.requestFocus()
-            unityPlayer?.resume()
-            Log.i(TAG, "Rendering started")
-        }
+        // Re-kick rendering after reparenting
+        unityPlayer?.windowFocusChanged(true)
+        frame.requestFocus()
+        unityPlayer?.resume()
+
+        Log.i(TAG, "Unity view reparented into container")
     }
 
     /**
-     * Detaches the Unity view from its current parent without destroying it.
+     * Detaches the Unity view from its current parent.
      */
-    fun detachFromContainer() {
+    fun detachView() {
         val frame = unityPlayerView ?: return
-        (frame.parent as? ViewGroup)?.removeView(frame)
-        Log.i(TAG, "Unity view detached from container")
+        (frame.parent as? ViewGroup)?.let { parent ->
+            parent.endViewTransition(frame)
+            parent.removeView(frame)
+        }
+        Log.i(TAG, "Unity view detached")
     }
 
     fun sendMessage(gameObject: String, methodName: String, message: String) {
@@ -164,6 +184,7 @@ class UnityBridge private constructor() : IUnityPlayerLifecycleEvents, NativeCal
 
     fun unload() {
         if (!isInitialized) return
+        isReady = false
         Log.i(TAG, "unload called")
         val action = Runnable {
             unityPlayer?.unload()
@@ -181,11 +202,13 @@ class UnityBridge private constructor() : IUnityPlayerLifecycleEvents, NativeCal
     override fun onUnityPlayerUnloaded() {
         Log.i(TAG, "onUnityPlayerUnloaded")
         unityPlayer = null
+        isReady = false
     }
 
     override fun onUnityPlayerQuitted() {
         Log.i(TAG, "onUnityPlayerQuitted")
         unityPlayer = null
+        isReady = false
     }
 
     // NativeCallProxy.MessageListener (Unity -> RN)
