@@ -72,6 +72,13 @@ class ExpoUnityView: ExpoView {
       return
     }
 
+    // Wrap window manipulation in an explicit CA transaction to ensure all
+    // layer tree changes from the window swap are committed atomically.
+    // Without this, pending SDWebImage callbacks in the same main queue
+    // drain cycle can trigger CA::Transaction::commit() on a stale context,
+    // crashing in _dispatch_async_f_slow.
+    CATransaction.begin()
+
     if let unityWindow = UnityBridge.shared().unityWindow() {
       if let myWindow = self.window, unityWindow != myWindow {
         unityWindow.isHidden = true
@@ -84,6 +91,8 @@ class ExpoUnityView: ExpoView {
     if unityView.superview != self {
       self.addSubview(unityView)
     }
+
+    CATransaction.commit()
   }
 
   override func layoutSubviews() {

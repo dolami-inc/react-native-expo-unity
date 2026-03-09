@@ -40,6 +40,7 @@ static UnityBridge *_shared = nil;
 
 #import <UnityFramework/UnityFramework.h>
 #import <UnityFramework/NativeCallProxy.h>
+#import <QuartzCore/CATransaction.h>
 
 #ifdef DEBUG
 #include <mach-o/ldsyms.h>
@@ -105,12 +106,17 @@ static UnityBridge *_shared = nil;
 
     self.ufwInternal = ufw;
 
-    // Hide Unity's window — we embed its rootView in our own view
+    // Hide Unity's window — we embed its rootView in our own view.
+    // Wrap in CATransaction to commit layer tree changes atomically
+    // before other main queue callbacks (e.g. SDWebImage) can fire
+    // and attempt CA commits on a stale rendering context.
+    [CATransaction begin];
     UIWindow *unityWindow = [ufw appController].window;
     if (unityWindow) {
         unityWindow.hidden = YES;
         unityWindow.userInteractionEnabled = NO;
     }
+    [CATransaction commit];
 
     NSLog(@"[ExpoUnity] Unity initialized");
 }
