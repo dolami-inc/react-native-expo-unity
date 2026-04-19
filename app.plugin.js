@@ -189,6 +189,61 @@ const withExpoUnity = (config, options = {}) => {
     },
   ]);
 
+  // -- Android: root build.gradle — inject newArch extra properties onto Unity
+  //    subprojects BEFORE ReactRootProjectPlugin runs --
+  //
+  // React Native 0.83+'s ReactRootProjectPlugin (applied to android/build.gradle)
+  // iterates every subproject and does:
+  //   if (subproject.hasProperty("react.newArchEnabled")) {
+  //     subproject.setProperty("react.newArchEnabled", "true")
+  //   }
+  // `hasProperty` returns true via inheritance (from root gradle.properties),
+  // but `setProperty` on a bare Unity subproject like `xrmanifest.androidlib`
+  // throws because the property doesn't exist as a direct project property:
+  //   "Could not set unknown property 'react.newArchEnabled' for project
+  //    ':unityLibrary:xrmanifest.androidlib'"
+  //
+  // Patching each subproject's build.gradle is too late — the RN plugin runs
+  // during the root project's `apply` phase, before any subproject's build.gradle
+  // is evaluated. Instead, we inject a `subprojects { }` block in the ROOT
+  // android/build.gradle BEFORE the RN plugin apply line. Gradle's subprojects
+  // closure runs the action immediately against all currently-known subprojects,
+  // so by the time ReactRootProjectPlugin iterates, Unity subprojects already
+  // have the extra properties and both hasProperty + setProperty succeed.
+  config = withProjectBuildGradle(config, (config) => {
+    const MARKER = '// react-native-expo-unity: RN newArch shim';
+    if (config.modResults.contents.includes(MARKER)) {
+      return config;
+    }
+
+    const shimBlock = [
+      '',
+      MARKER,
+      "subprojects { sub ->",
+      "  if (sub.path.startsWith(':unityLibrary')) {",
+      "    sub.ext.set('react.newArchEnabled', 'true')",
+      "    sub.ext.set('newArchEnabled', 'true')",
+      '  }',
+      '}',
+      '',
+    ].join('\n');
+
+    // Insert before `apply plugin: "com.facebook.react.rootproject"` so the
+    // ext props are set on Unity subprojects before RN plugin reads them.
+    const applyRegex = /apply plugin:\s*["']com\.facebook\.react\.rootproject["']/;
+    if (applyRegex.test(config.modResults.contents)) {
+      config.modResults.contents = config.modResults.contents.replace(
+        applyRegex,
+        `${shimBlock}$&`
+      );
+    } else {
+      // Fallback: append at end
+      config.modResults.contents += `\n${shimBlock}`;
+    }
+
+    return config;
+  });
+
   // -- Android: gradle.properties (copy Unity properties to host project) --
   // Unity's build.gradle references properties like `unityStreamingAssets` and
   // `unity.*` that are defined in the Unity export's gradle.properties. When the
