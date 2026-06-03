@@ -141,6 +141,20 @@ class UnityBridge private constructor() : IUnityPlayerLifecycleEvents, NativeCal
             FrameLayout.LayoutParams.MATCH_PARENT
         ))
 
+        // RN won't lay out this natively-added child, so size it to the
+        // container's current bounds immediately. Without this the surface
+        // keeps the full-screen size it had while parked in the Activity and
+        // renders behind the bottom tab bar. onLayout keeps it in sync after.
+        val w = container.width
+        val h = container.height
+        if (w > 0 && h > 0) {
+            frame.measure(
+                View.MeasureSpec.makeMeasureSpec(w, View.MeasureSpec.EXACTLY),
+                View.MeasureSpec.makeMeasureSpec(h, View.MeasureSpec.EXACTLY)
+            )
+            frame.layout(0, 0, w, h)
+        }
+
         // Re-kick rendering after reparenting
         unityPlayer?.windowFocusChanged(true)
         frame.requestFocus()
