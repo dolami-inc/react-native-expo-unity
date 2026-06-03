@@ -2,7 +2,6 @@ package expo.modules.unity
 
 import android.content.Context
 import android.util.Log
-import android.view.View
 import expo.modules.kotlin.AppContext
 import expo.modules.kotlin.viewevent.EventDispatcher
 import expo.modules.kotlin.views.ExpoView
@@ -15,6 +14,16 @@ class ExpoUnityView(context: Context, appContext: AppContext) : ExpoView(context
 
     val onUnityMessage by EventDispatcher()
     var autoUnloadOnUnmount: Boolean = true
+
+    // Let Android lay out this view's subtree instead of React Native. Unity's
+    // SurfaceView resizes its render surface by calling requestLayout(), but RN
+    // swallows that call — so the surface stays at a stale size and doesn't fill
+    // the view, leaving a background gap (and, before this, ignoring the RN
+    // bounds entirely). With this enabled, requestLayout() triggers a real
+    // Android measure/layout pass so the Unity surface matches the bounds
+    // React Native assigns from the JS style (the equivalent of iOS
+    // layoutSubviews syncing the Unity frame to self.bounds).
+    override val shouldUseAndroidLayout: Boolean = true
 
     init {
         post { setupUnity() }
@@ -47,28 +56,6 @@ class ExpoUnityView(context: Context, appContext: AppContext) : ExpoView(context
                 }, 3000)
             }
         }
-    }
-
-    override fun onLayout(changed: Boolean, left: Int, top: Int, right: Int, bottom: Int) {
-        super.onLayout(changed, left, top, right, bottom)
-        // Keep the Unity surface sized to this view's bounds (Android
-        // equivalent of iOS layoutSubviews). React Native does not lay out
-        // natively-added children, so the Unity FrameLayout — added with
-        // MATCH_PARENT while parked full-screen in the Activity content view —
-        // otherwise keeps that full-screen size and overflows behind the
-        // bottom tab bar instead of shrinking to fit above it.
-        val frame = UnityBridge.getInstance().unityPlayerView ?: return
-        if (frame.parent !== this) return
-        layoutUnityFrame(frame, right - left, bottom - top)
-    }
-
-    private fun layoutUnityFrame(frame: View, width: Int, height: Int) {
-        if (width <= 0 || height <= 0) return
-        frame.measure(
-            MeasureSpec.makeMeasureSpec(width, MeasureSpec.EXACTLY),
-            MeasureSpec.makeMeasureSpec(height, MeasureSpec.EXACTLY)
-        )
-        frame.layout(0, 0, width, height)
     }
 
     override fun onWindowFocusChanged(hasWindowFocus: Boolean) {

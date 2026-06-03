@@ -5,7 +5,6 @@ import android.graphics.PixelFormat
 import android.os.Handler
 import android.os.Looper
 import android.util.Log
-import android.view.View
 import android.view.ViewGroup
 import android.view.WindowManager
 import android.widget.FrameLayout
@@ -141,19 +140,11 @@ class UnityBridge private constructor() : IUnityPlayerLifecycleEvents, NativeCal
             FrameLayout.LayoutParams.MATCH_PARENT
         ))
 
-        // RN won't lay out this natively-added child, so size it to the
-        // container's current bounds immediately. Without this the surface
-        // keeps the full-screen size it had while parked in the Activity and
-        // renders behind the bottom tab bar. onLayout keeps it in sync after.
-        val w = container.width
-        val h = container.height
-        if (w > 0 && h > 0) {
-            frame.measure(
-                View.MeasureSpec.makeMeasureSpec(w, View.MeasureSpec.EXACTLY),
-                View.MeasureSpec.makeMeasureSpec(h, View.MeasureSpec.EXACTLY)
-            )
-            frame.layout(0, 0, w, h)
-        }
+        // Kick a layout pass so the Unity surface sizes to the container's
+        // bounds. ExpoUnityView has shouldUseAndroidLayout = true, so this
+        // schedules a real Android measure/layout that resizes the surface
+        // (a plain measure/layout call wouldn't refresh the SurfaceView buffer).
+        container.requestLayout()
 
         // Re-kick rendering after reparenting
         unityPlayer?.windowFocusChanged(true)
