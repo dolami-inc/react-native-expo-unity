@@ -49,8 +49,13 @@ static UnityBridge *_shared = nil;
 @interface UnityBridge () <NativeCallsProtocol, UnityFrameworkListener>
 
 @property (nonatomic, strong, nullable) UnityFramework *ufwInternal;
+// Buffers Unity → RN messages emitted while no onMessage sink is attached.
+@property (nonatomic, strong) NSMutableArray<NSString *> *pendingMessages;
 
 @end
+
+// Cap on buffered Unity → RN messages held while no sink is attached.
+static const NSUInteger kMaxPendingMessages = 128;
 
 @implementation UnityBridge
 
@@ -160,9 +165,46 @@ static UnityBridge *_shared = nil;
 
 // MARK: - NativeCallsProtocol (Unity → RN)
 
+// View-bound sink. Set when an ExpoUnityView mounts and nil'd when it is
+// removed (removeFromSuperview). Override the setter so that any messages
+// buffered while no sink was attached are flushed — in arrival order — the
+// moment a sink is (re)attached, instead of being silently dropped.
+- (void)setOnMessage:(UnityMessageCallback)onMessage {
+    _onMessage = [onMessage copy];
+    if (!_onMessage) return;
+
+    NSArray<NSString *> *drained = nil;
+    @synchronized (self) {
+        if (self.pendingMessages.count > 0) {
+            drained = [self.pendingMessages copy];
+            [self.pendingMessages removeAllObjects];
+        }
+    }
+    if (drained.count > 0) {
+        UnityMessageCallback sink = _onMessage;
+        dispatch_async(dispatch_get_main_queue(), ^{
+            for (NSString *message in drained) {
+                sink(message);
+            }
+        });
+    }
+}
+
 - (void)sendMessageToMobileApp:(NSString *)message {
-    if (self.onMessage) {
-        self.onMessage(message);
+    UnityMessageCallback sink = self.onMessage;
+    if (sink) {
+        sink(message);
+        return;
+    }
+    // No sink attached — buffer instead of dropping. Flushed on (re)attach.
+    @synchronized (self) {
+        if (!self.pendingMessages) {
+            self.pendingMessages = [NSMutableArray array];
+        }
+        if (self.pendingMessages.count >= kMaxPendingMessages) {
+            [self.pendingMessages removeObjectAtIndex:0];
+        }
+        [self.pendingMessages addObject:message];
     }
 }
 
