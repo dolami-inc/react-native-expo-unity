@@ -26,6 +26,9 @@ class UnityBridge private constructor() : IUnityPlayerLifecycleEvents, NativeCal
     companion object {
         private const val TAG = "ExpoUnity"
 
+        /** Cap on buffered Unity → RN messages held while no sink is attached. */
+        private const val MAX_PENDING_MESSAGES = 128
+
         @Volatile
         private var instance: UnityBridge? = null
 
@@ -42,7 +45,25 @@ class UnityBridge private constructor() : IUnityPlayerLifecycleEvents, NativeCal
     var unityPlayer: UnityPlayer? = null
         private set
 
+    /**
+     * View-bound sink for Unity → RN messages. Set when an ExpoUnityView
+     * attaches and nulled when it detaches (onDetachedFromWindow).
+     *
+     * Unity keeps running while parked in the Activity background, so it can
+     * emit messages while no view is attached (e.g. the user navigated off the
+     * camera tab, or during the mount/reparent gap). Rather than dropping those
+     * silently, they are buffered in [pendingMessages] and flushed — in arrival
+     * order — the moment a sink is (re)attached.
+     */
     var onMessage: ((String) -> Unit)? = null
+        set(value) {
+            field = value
+            if (value != null) flushPendingMessages(value)
+        }
+
+    /** Buffers Unity → RN messages emitted while no [onMessage] sink is attached. */
+    private val pendingMessages = ArrayDeque<String>()
+    private val pendingLock = Any()
 
     /** Tracked here (not on the Module) so it survives module recreation. */
     var wasRunningBeforeBackground: Boolean = false
@@ -140,6 +161,18 @@ class UnityBridge private constructor() : IUnityPlayerLifecycleEvents, NativeCal
             FrameLayout.LayoutParams.MATCH_PARENT
         ))
 
+        // Unity fits the system navigation-bar inset into its frame (and, without
+        // the unity.render-outside-safearea manifest flag, the display cutout),
+        // leaving a gap between the Unity surface and the RN-assigned bounds.
+        // Consume the system-window insets on the Unity frame so it fills the full
+        // container, matching iOS where unityView.frame is pinned to self.bounds.
+        frame.fitsSystemWindows = false
+        frame.setOnApplyWindowInsetsListener { _, insets ->
+            @Suppress("DEPRECATION")
+            insets.consumeSystemWindowInsets()
+        }
+        frame.requestApplyInsets()
+
         // Kick a layout pass so the Unity surface sizes to the container's
         // bounds. ExpoUnityView has shouldUseAndroidLayout = true, so this
         // schedules a real Android measure/layout that resizes the surface
@@ -219,6 +252,33 @@ class UnityBridge private constructor() : IUnityPlayerLifecycleEvents, NativeCal
     // NativeCallProxy.MessageListener (Unity -> RN)
 
     override fun onMessage(message: String) {
-        onMessage?.invoke(message)
+        val sink = onMessage
+        if (sink != null) {
+            sink(message)
+        } else {
+            // No view attached — buffer instead of dropping. Flushed on attach.
+            synchronized(pendingLock) {
+                if (pendingMessages.size >= MAX_PENDING_MESSAGES) {
+                    pendingMessages.removeFirst()
+                }
+                pendingMessages.addLast(message)
+            }
+        }
+    }
+
+    /** Drains buffered messages into a freshly-attached sink, in arrival order. */
+    private fun flushPendingMessages(sink: (String) -> Unit) {
+        val drained: List<String>
+        synchronized(pendingLock) {
+            if (pendingMessages.isEmpty()) return
+            drained = pendingMessages.toList()
+            pendingMessages.clear()
+        }
+        val deliver = Runnable { drained.forEach { sink(it) } }
+        if (Looper.myLooper() == Looper.getMainLooper()) {
+            deliver.run()
+        } else {
+            mainHandler.post(deliver)
+        }
     }
 }
