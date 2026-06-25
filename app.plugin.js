@@ -82,9 +82,16 @@ const withExpoUnity = (config, options = {}) => {
     if (fs.existsSync(frameworkSrc)) {
       const target = xcodeProject.getFirstTarget();
 
+      // Emit a machine-independent path: $SRCROOT is the .xcodeproj dir
+      // (<projectRoot>/ios) at build time, so reference the framework relative
+      // to it. This keeps the committed pbxproj portable across machines/users
+      // instead of baking in the absolute path of whoever ran prebuild.
+      const frameworkSrcRef =
+        '${SRCROOT}/' + path.relative(path.join(projectRoot, 'ios'), frameworkSrc);
+
       const script = [
         'if [ "${PLATFORM_NAME}" = "iphoneos" ]; then',
-        '  FRAMEWORK_SRC="' + frameworkSrc + '"',
+        '  FRAMEWORK_SRC="' + frameworkSrcRef + '"',
         '  DEST="${BUILT_PRODUCTS_DIR}/${FRAMEWORKS_FOLDER_PATH}"',
         '  mkdir -p "${DEST}"',
         '  rsync -av --delete "${FRAMEWORK_SRC}" "${DEST}/"',
@@ -94,16 +101,33 @@ const withExpoUnity = (config, options = {}) => {
         'fi',
       ].join('\n');
 
-      xcodeProject.addBuildPhase(
-        [],
-        'PBXShellScriptBuildPhase',
-        'Embed UnityFramework',
-        target.uuid,
-        {
-          shellPath: '/bin/sh',
-          shellScript: script,
-        }
-      );
+      // Guard against duplicate phases: addBuildPhase is not idempotent, so
+      // every prebuild would otherwise append another "Embed UnityFramework"
+      // phase. Skip if one already exists.
+      const existingPhases =
+        xcodeProject.hash.project.objects['PBXShellScriptBuildPhase'] || {};
+      const alreadyEmbedded = Object.keys(existingPhases).some((key) => {
+        const phase = existingPhases[key];
+        return (
+          phase &&
+          typeof phase === 'object' &&
+          typeof phase.name === 'string' &&
+          phase.name.includes('Embed UnityFramework')
+        );
+      });
+
+      if (!alreadyEmbedded) {
+        xcodeProject.addBuildPhase(
+          [],
+          'PBXShellScriptBuildPhase',
+          'Embed UnityFramework',
+          target.uuid,
+          {
+            shellPath: '/bin/sh',
+            shellScript: script,
+          }
+        );
+      }
     }
 
     return config;
@@ -119,9 +143,18 @@ const withExpoUnity = (config, options = {}) => {
 
     const unityLibDir = path.join(androidUnityPath, 'unityLibrary');
 
+    // Emit a machine-independent path: rootDir is the settings.gradle dir
+    // (<projectRoot>/android), so reference unityLibrary relative to it. Keeps
+    // the committed settings.gradle portable across machines/users instead of
+    // baking in the absolute path of whoever ran prebuild.
+    const unityLibRelDir = path.relative(
+      path.join(projectRoot, 'android'),
+      unityLibDir
+    );
+
     // Include :unityLibrary module
     const includeSnippet = `include ':unityLibrary'`;
-    const projectSnippet = `project(':unityLibrary').projectDir = new File('${unityLibDir}')`;
+    const projectSnippet = `project(':unityLibrary').projectDir = new File(rootDir, '${unityLibRelDir}')`;
 
     if (!config.modResults.contents.includes(includeSnippet)) {
       config.modResults.contents +=
