@@ -37,11 +37,7 @@ class ExpoUnityView(context: Context, appContext: AppContext) : ExpoView(context
 
         val bridge = UnityBridge.getInstance()
 
-        bridge.onMessage = { message ->
-            post {
-                onUnityMessage(mapOf("message" to message))
-            }
-        }
+        installMessageSink(bridge)
 
         if (bridge.isReady) {
             // Unity already initialized — reparent into this container
@@ -54,6 +50,31 @@ class ExpoUnityView(context: Context, appContext: AppContext) : ExpoView(context
                 postDelayed({
                     bridge.reparentInto(this)
                 }, 3000)
+            }
+        }
+    }
+
+    private fun installMessageSink(bridge: UnityBridge) {
+        bridge.onMessage = { message ->
+            post {
+                onUnityMessage(mapOf("message" to message))
+            }
+        }
+    }
+
+    override fun onAttachedToWindow() {
+        super.onAttachedToWindow()
+        val bridge = UnityBridge.getInstance()
+
+        // react-native-screens detaches/re-attaches this native view on tab
+        // switches and stack pushes without remounting the React component, so
+        // init{} (the only setupUnity() caller) never runs again. Restore the
+        // sink nulled in onDetachedFromWindow — assigning it also flushes any
+        // messages Unity buffered while detached — and resume rendering.
+        if (bridge.onMessage == null && bridge.isInitialized) {
+            installMessageSink(bridge)
+            if (bridge.isReady) {
+                bridge.reparentInto(this)
             }
         }
     }
