@@ -55,15 +55,37 @@ class UnityBridge private constructor() : IUnityPlayerLifecycleEvents, NativeCal
      * silently, they are buffered in [pendingMessages] and flushed — in arrival
      * order — the moment a sink is (re)attached.
      */
-    var onMessage: ((String) -> Unit)? = null
-        set(value) {
-            field = value
-            if (value != null) flushPendingMessages(value)
-        }
-
     /** Buffers Unity → RN messages emitted while no [onMessage] sink is attached. */
     private val pendingMessages = ArrayDeque<String>()
     private val pendingLock = Any()
+
+    // Backing field for [onMessage], guarded by [pendingLock]. `onMessage` is
+    // invoked on the Unity player thread while the sink is set/cleared on the
+    // main thread, so the "is a sink attached?" check and the buffer/flush must
+    // be mutually exclusive — otherwise a message read as sink-less can be
+    // buffered *after* the setter already flushed, stranding it until the next
+    // attach (Android-only, intermittent lost messages such as `image_taken`).
+    private var messageSink: ((String) -> Unit)? = null
+
+    var onMessage: ((String) -> Unit)?
+        get() = synchronized(pendingLock) { messageSink }
+        set(value) {
+            var drained: List<String>? = null
+            synchronized(pendingLock) {
+                messageSink = value
+                if (value != null && pendingMessages.isNotEmpty()) {
+                    drained = pendingMessages.toList()
+                    pendingMessages.clear()
+                }
+            }
+            // Deliver the drained backlog outside the lock, in arrival order.
+            val toDeliver = drained
+            if (value != null && toDeliver != null) {
+                val deliver = Runnable { toDeliver.forEach { value(it) } }
+                if (Looper.myLooper() == Looper.getMainLooper()) deliver.run()
+                else mainHandler.post(deliver)
+            }
+        }
 
     /** Tracked here (not on the Module) so it survives module recreation. */
     var wasRunningBeforeBackground: Boolean = false
@@ -252,33 +274,21 @@ class UnityBridge private constructor() : IUnityPlayerLifecycleEvents, NativeCal
     // NativeCallProxy.MessageListener (Unity -> RN)
 
     override fun onMessage(message: String) {
-        val sink = onMessage
-        if (sink != null) {
-            sink(message)
-        } else {
-            // No view attached — buffer instead of dropping. Flushed on attach.
-            synchronized(pendingLock) {
+        // Hold [pendingLock] across the sink check AND the buffer write so a
+        // concurrent setter (main thread) can't flush between them and strand
+        // this message. The sink itself only posts to the main handler, so
+        // delivering under the lock is cheap and non-blocking.
+        synchronized(pendingLock) {
+            val sink = messageSink
+            if (sink != null) {
+                sink(message)
+            } else {
+                // No view attached — buffer instead of dropping. Flushed on attach.
                 if (pendingMessages.size >= MAX_PENDING_MESSAGES) {
                     pendingMessages.removeFirst()
                 }
                 pendingMessages.addLast(message)
             }
-        }
-    }
-
-    /** Drains buffered messages into a freshly-attached sink, in arrival order. */
-    private fun flushPendingMessages(sink: (String) -> Unit) {
-        val drained: List<String>
-        synchronized(pendingLock) {
-            if (pendingMessages.isEmpty()) return
-            drained = pendingMessages.toList()
-            pendingMessages.clear()
-        }
-        val deliver = Runnable { drained.forEach { sink(it) } }
-        if (Looper.myLooper() == Looper.getMainLooper()) {
-            deliver.run()
-        } else {
-            mainHandler.post(deliver)
         }
     }
 }
