@@ -42,8 +42,15 @@ class UnityBridge private constructor() : IUnityPlayerLifecycleEvents, NativeCal
 
     private val mainHandler = Handler(Looper.getMainLooper())
 
+    @Volatile
     var unityPlayer: UnityPlayer? = null
         private set
+
+    // Set when unload() failed with the engine half-booted. The abandoned
+    // player still owns the process's single Unity runtime slot, so
+    // initialize() must never construct another one in this process.
+    @Volatile
+    private var playerAbandoned = false
 
     /**
      * View-bound sink for Unity → RN messages. Set when an ExpoUnityView
@@ -104,6 +111,10 @@ class UnityBridge private constructor() : IUnityPlayerLifecycleEvents, NativeCal
      * (behind everything) to let the engine start, then fires [onReady].
      */
     fun initialize(activity: Activity, onReady: (() -> Unit)? = null) {
+        if (playerAbandoned) {
+            Log.e(TAG, "Unity player was abandoned after a failed unload; refusing to re-initialize in this process")
+            return
+        }
         if (isInitialized) {
             onReady?.invoke()
             return
@@ -247,8 +258,21 @@ class UnityBridge private constructor() : IUnityPlayerLifecycleEvents, NativeCal
         isReady = false
         Log.i(TAG, "unload called")
         val action = Runnable {
-            unityPlayer?.unload()
-            Log.i(TAG, "unload completed")
+            try {
+                unityPlayer?.unload()
+                Log.i(TAG, "unload completed")
+            } catch (e: LinkageError) {
+                // Unity's JNI natives were never registered — the engine never
+                // finished booting. In 90 days of Crashlytics data (Pier) this
+                // fired only on x86_64 devices with spoofed fingerprints, and
+                // unload() was the only native entry point that ever threw.
+                // Drop the player rather than crash, and mark it abandoned:
+                // onUnityPlayerUnloaded will never fire for it, so a
+                // re-initialize would construct a second Unity runtime.
+                Log.e(TAG, "unload failed; Unity natives not registered", e)
+                playerAbandoned = true
+                unityPlayer = null
+            }
         }
         if (Looper.myLooper() == Looper.getMainLooper()) {
             action.run()
