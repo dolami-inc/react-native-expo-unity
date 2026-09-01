@@ -124,6 +124,29 @@ function parseUnityMessage<T = unknown>(raw: string): UnityEvent<T> | null {
 />
 ```
 
+## Delivery Guarantees (Unity → RN)
+
+Unity starts emitting before React Native can listen. On iOS the first scene
+loads *inside* `runEmbeddedWithArgc:`, so a message sent from `Awake()`/`Start()`
+can be produced before `<UnityView />` has attached its handler; on Android the
+Unity thread starts with the player, ahead of the view.
+
+The native bridge closes that window for you:
+
+- Messages emitted while no view is attached are **buffered** (up to 128, oldest
+  dropped first) and **replayed in arrival order** the moment a view attaches.
+  This covers both the first attach and re-attaches — `react-native-screens`
+  detaches the native view on tab switches without remounting the component.
+- A message can therefore arrive **later than it was sent**, and a one-shot event
+  can be **delivered twice** across an unmount/remount cycle. Make handlers
+  idempotent: guard state transitions (`if (isReady) return;`) instead of
+  assuming a readiness event fires exactly once.
+- Messages are **not** buffered across `unloadUnity()` — the Unity process state
+  they refer to is gone.
+
+You do not need to poll Unity for readiness. If a readiness event never arrives,
+that is a bug in this module — file an issue rather than adding a probe.
+
 ## Why JSON?
 
 - Consistent structure for all messages

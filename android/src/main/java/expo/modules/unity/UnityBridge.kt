@@ -127,10 +127,17 @@ class UnityBridge private constructor() : IUnityPlayerLifecycleEvents, NativeCal
                 val flags = activity.window.attributes.flags
                 val wasFullScreen = (flags and WindowManager.LayoutParams.FLAG_FULLSCREEN) != 0
 
+                // Register the Unity -> RN listener BEFORE constructing the
+                // player: the constructor starts the Unity thread, so C# code
+                // can call NativeCallProxy.sendMessageToMobileApp() the moment
+                // it returns (iOS lost a one-shot `unity_ready` to the mirror
+                // image of this window — issue #5). Registering first routes
+                // those into the pending buffer instead of dropping them.
+                NativeCallProxy.registerListener(this)
+
                 val player = UnityPlayerForActivityOrService(activity, this)
                 unityPlayer = player
 
-                NativeCallProxy.registerListener(this)
                 Log.i(TAG, "Unity player created")
 
                 // Park in Activity's content view at full size but behind

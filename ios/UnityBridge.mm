@@ -93,6 +93,21 @@ static UnityBridge *_shared = nil;
 
     [ufw setDataBundleId:[bundle.bundleIdentifier cStringUsingEncoding:NSUTF8StringEncoding]];
 
+    // Register the Unity -> native call handler BEFORE booting Unity.
+    //
+    // runEmbeddedWithArgc: loads the first scene synchronously, so the scene's
+    // Awake/Start can call sendMessageToMobileApp() before it returns. That
+    // extern "C" trampoline (Assets/Plugins/iOS/NativeCallProxy.mm) forwards to
+    // a global `api` that is nil until this call, and a message sent to nil is
+    // silently discarded — it never reaches -sendMessageToMobileApp: below, so
+    // the pending-message buffer cannot rescue it either.
+    //
+    // Unity 6000.3 boots fast enough that RNBridgeReceiver.Start() lands inside
+    // runEmbeddedWithArgc:, which made a one-shot `unity_ready` disappear 100%
+    // of the time (dolami-inc/react-native-expo-unity#5). Registering first
+    // turns that window into a buffered message instead of a lost one.
+    [NSClassFromString(@"FrameworkLibAPI") registerAPIforNativeCalls:self];
+
     // Boot Unity
     NSArray *args = [[NSProcessInfo processInfo] arguments];
     int argc = (int)args.count;
@@ -105,9 +120,8 @@ static UnityBridge *_shared = nil;
     [ufw runEmbeddedWithArgc:1 argv:argv appLaunchOpts:nil];
     [ufw appController].quitHandler = ^{ NSLog(@"[ExpoUnity] Unity quit handler called"); };
 
-    // Register for callbacks
+    // Register for unload/quit notifications
     [ufw registerFrameworkListener:self];
-    [NSClassFromString(@"FrameworkLibAPI") registerAPIforNativeCalls:self];
 
     self.ufwInternal = ufw;
 
@@ -181,6 +195,7 @@ static UnityBridge *_shared = nil;
         }
     }
     if (drained.count > 0) {
+        NSLog(@"[ExpoUnity] flushing %lu message(s) buffered before sink attach", (unsigned long)drained.count);
         UnityMessageCallback sink = _onMessage;
         dispatch_async(dispatch_get_main_queue(), ^{
             for (NSString *message in drained) {
