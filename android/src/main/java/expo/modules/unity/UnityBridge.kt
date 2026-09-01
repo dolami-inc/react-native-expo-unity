@@ -261,6 +261,7 @@ class UnityBridge private constructor() : IUnityPlayerLifecycleEvents, NativeCal
     }
 
     fun unload() {
+        discardPendingMessages()
         if (!isInitialized) return
         isReady = false
         Log.i(TAG, "unload called")
@@ -288,18 +289,39 @@ class UnityBridge private constructor() : IUnityPlayerLifecycleEvents, NativeCal
         }
     }
 
+    /**
+     * Drops the buffered backlog when Unity goes away. Those messages describe a
+     * process that no longer exists — replaying them into the next one would,
+     * for a one-shot event such as `unity_ready`, promote readiness before the
+     * new engine has booted, and for `image_taken` hand out a path from the
+     * previous session.
+     */
+    private fun discardPendingMessages() {
+        val dropped = synchronized(pendingLock) {
+            val n = pendingMessages.size
+            pendingMessages.clear()
+            n
+        }
+        if (dropped > 0) {
+            Log.i(TAG, "discarded $dropped buffered message(s) from the unloaded Unity session")
+        }
+    }
+
     // IUnityPlayerLifecycleEvents
 
     override fun onUnityPlayerUnloaded() {
         Log.i(TAG, "onUnityPlayerUnloaded")
         unityPlayer = null
         isReady = false
+        // Also drop anything Unity emitted between the unload request and here.
+        discardPendingMessages()
     }
 
     override fun onUnityPlayerQuitted() {
         Log.i(TAG, "onUnityPlayerQuitted")
         unityPlayer = null
         isReady = false
+        discardPendingMessages()
     }
 
     // NativeCallProxy.MessageListener (Unity -> RN)

@@ -141,8 +141,9 @@ The native bridge closes that window for you:
   can be **delivered twice** across an unmount/remount cycle. Make handlers
   idempotent: guard state transitions (`if (isReady) return;`) instead of
   assuming a readiness event fires exactly once.
-- Messages are **not** buffered across `unloadUnity()` — the Unity process state
-  they refer to is gone.
+- The backlog is **dropped on `unloadUnity()`** (and on Unity quitting). Those
+  messages describe a process that no longer exists, so replaying them into the
+  next one would promote readiness before the new engine has booted.
 
 You do not need to poll Unity for readiness. If a readiness event never arrives,
 that is a bug in this module — file an issue rather than adding a probe.

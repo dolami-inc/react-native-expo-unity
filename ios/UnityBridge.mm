@@ -170,6 +170,7 @@ static UnityBridge *_shared = nil;
 
 - (void)unload {
     NSLog(@"[ExpoUnity] unload called, isInitialized=%d", [self isInitialized]);
+    [self discardPendingMessages];
     if (![self isInitialized]) return;
     UIWindow *mainWindow = [[[UIApplication sharedApplication] delegate] window];
     if (mainWindow) [mainWindow makeKeyAndVisible];
@@ -183,20 +184,32 @@ static UnityBridge *_shared = nil;
 // removed (removeFromSuperview). Override the setter so that any messages
 // buffered while no sink was attached are flushed — in arrival order — the
 // moment a sink is (re)attached, instead of being silently dropped.
-- (void)setOnMessage:(UnityMessageCallback)onMessage {
-    _onMessage = [onMessage copy];
-    if (!_onMessage) return;
+@synthesize onMessage = _onMessage;
 
+- (UnityMessageCallback)onMessage {
+    @synchronized (self) {
+        return _onMessage;
+    }
+}
+
+- (void)setOnMessage:(UnityMessageCallback)onMessage {
+    UnityMessageCallback sink = [onMessage copy];
+
+    // Install the sink and drain under the same lock that -sendMessageToMobileApp:
+    // holds, so a message cannot be classified as sink-less and then appended
+    // *after* this flush has already run (which would strand it until the next
+    // attach). Same invariant as the Android bridge.
     NSArray<NSString *> *drained = nil;
     @synchronized (self) {
-        if (self.pendingMessages.count > 0) {
+        _onMessage = sink;
+        if (sink && self.pendingMessages.count > 0) {
             drained = [self.pendingMessages copy];
             [self.pendingMessages removeAllObjects];
         }
     }
+
     if (drained.count > 0) {
         NSLog(@"[ExpoUnity] flushing %lu message(s) buffered before sink attach", (unsigned long)drained.count);
-        UnityMessageCallback sink = _onMessage;
         dispatch_async(dispatch_get_main_queue(), ^{
             for (NSString *message in drained) {
                 sink(message);
@@ -206,13 +219,17 @@ static UnityBridge *_shared = nil;
 }
 
 - (void)sendMessageToMobileApp:(NSString *)message {
-    UnityMessageCallback sink = self.onMessage;
-    if (sink) {
-        sink(message);
-        return;
-    }
-    // No sink attached — buffer instead of dropping. Flushed on (re)attach.
+    // Unity may emit from a scripting thread while the sink is installed on the
+    // main thread, so the "is a sink attached?" check and the buffer write must
+    // be mutually exclusive with -setOnMessage:. The sink only hops to the main
+    // queue, so calling it under the lock is cheap and cannot deadlock.
     @synchronized (self) {
+        UnityMessageCallback sink = _onMessage;
+        if (sink) {
+            sink(message);
+            return;
+        }
+        // No sink attached — buffer instead of dropping. Flushed on (re)attach.
         if (!self.pendingMessages) {
             self.pendingMessages = [NSMutableArray array];
         }
@@ -223,10 +240,24 @@ static UnityBridge *_shared = nil;
     }
 }
 
+// Buffered messages describe a Unity process that is going away — replaying
+// them into the next one would, for a one-shot event such as `unity_ready`,
+// promote readiness before the new engine has loaded its first scene.
+- (void)discardPendingMessages {
+    @synchronized (self) {
+        if (self.pendingMessages.count == 0) return;
+        NSLog(@"[ExpoUnity] discarding %lu buffered message(s) from the unloaded Unity session",
+              (unsigned long)self.pendingMessages.count);
+        [self.pendingMessages removeAllObjects];
+    }
+}
+
 // MARK: - UnityFrameworkListener
 
 - (void)unityDidUnload:(NSNotification *)notification {
     NSLog(@"[ExpoUnity] unityDidUnload notification received");
+    // Also drop anything Unity emitted between the unload request and here.
+    [self discardPendingMessages];
     [self.ufwInternal unregisterFrameworkListener:self];
     self.ufwInternal = nil;
     NSLog(@"[ExpoUnity] ufwInternal set to nil, ready for re-initialize");
@@ -234,6 +265,7 @@ static UnityBridge *_shared = nil;
 
 - (void)unityDidQuit:(NSNotification *)notification {
     NSLog(@"[ExpoUnity] Unity did quit");
+    [self discardPendingMessages];
     [self.ufwInternal unregisterFrameworkListener:self];
     self.ufwInternal = nil;
 }
