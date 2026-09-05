@@ -20,7 +20,7 @@
   ],
   "repository": {
     "type": "git",
-    "url": "https://github.com/dolami-inc/react-native-expo-unity.git"
+    "url": "git+https://github.com/dolami-inc/react-native-expo-unity.git"
   },
   "keywords": [
     "expo",
